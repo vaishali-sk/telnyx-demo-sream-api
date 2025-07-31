@@ -13,7 +13,7 @@ import {
   Circle,
   Square
 } from "lucide-react";
-import { useCallContext } from "@/contexts/telnyx-call-context";
+import { useCallContext } from "@/contexts/call-context-stable";
 import { formatDistanceToNow } from "date-fns";
 
 export function ActiveCallsNew() {

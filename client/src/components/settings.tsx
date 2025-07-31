@@ -10,7 +10,7 @@ import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { type TelnyxConfig } from "@shared/schema";
 import { CheckCircle, AlertCircle, Loader2 } from "lucide-react";
-import {TELNYX_CONFIG} from "../../../telnyx-config.ts";
+import {TELNYX_CONFIG} from "../../../telnyx-config";
 
 export function Settings() {
   const { toast } = useToast();

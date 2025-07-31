@@ -1,4 +1,4 @@
-import { useCallContext } from "@/contexts/telnyx-call-context";
+import { useCallContext } from "@/contexts/call-context-stable";
 import { cn } from "@/lib/utils";
 
 export function ConnectionStatus() {

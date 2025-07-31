@@ -3,11 +3,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { DialerNew } from "@/components/dialer-new";
+import { AudioBridgeDialer } from "@/components/audio-bridge-dialer";
 import { ActiveCallsNew } from "@/components/active-calls-new";
 import { Settings } from "@/components/settings";
 import { ConnectionStatus } from "@/components/connection-status";
-import { useCallContext } from "@/contexts/telnyx-call-context";
+
+import { useCallContext } from "@/contexts/call-context-stable";
 import { Phone, Settings as SettingsIcon, Users, History } from "lucide-react";
 
 export default function SoftphoneNew() {
@@ -56,7 +57,7 @@ export default function SoftphoneNew() {
               </TabsList>
               
               <TabsContent value="dialer" className="mt-4">
-                <DialerNew />
+                <AudioBridgeDialer />
               </TabsContent>
               
               <TabsContent value="settings" className="mt-4">

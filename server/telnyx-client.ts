@@ -35,15 +35,23 @@ export class TelnyxClient {
     this.webhookUrl = 'https://54cdb265ccf9.ngrok-free.app/webhooks/calls';
   }
 
-  // Call Management
+  // Call Management with Bridge Mode for Audio
   async createCall(to: string, from?: string): Promise<TelnyxCall> {
     try {
+      // For audio to work, we need to implement bridge mode:
+      // 1. First call your phone number
+      // 2. When you answer, bridge to the target number
+      // This gives you audio through your physical phone
+      
       const response = await this.api.post('/calls', {
         to,
         from: from || TELNYX_CONFIG.FROM_NUMBER,
         connection_id: TELNYX_CONFIG.APPLICATION_ID,
         webhook_url: this.webhookUrl,
-        webhook_url_method: 'POST'
+        webhook_url_method: 'POST',
+        // Add answer URL for bridge mode
+        answer_url: `${this.webhookUrl}/answer`,
+        answer_method: 'POST'
       });
       return response.data.data;
     } catch (error: any) {
@@ -54,6 +62,36 @@ export class TelnyxClient {
       } else {
         console.error('❌ Unknown error:', error.message);
       }
+      throw error; // Re-throw to handle in calling code
+    }
+  }
+
+  // Bridge Mode: Call your phone first, then bridge to target
+  async createBridgedCall(targetNumber: string, userPhoneNumber: string): Promise<TelnyxCall> {
+    try {
+      console.log(`🌉 Creating bridged call: You (${userPhoneNumber}) -> Target (${targetNumber})`);
+      
+      // Step 1: Call the user's phone first
+      const response = await this.api.post('/calls', {
+        to: userPhoneNumber, // Call your phone first
+        from: TELNYX_CONFIG.FROM_NUMBER,
+        connection_id: TELNYX_CONFIG.APPLICATION_ID,
+        webhook_url: this.webhookUrl,
+        webhook_url_method: 'POST',
+        // When you answer, we'll bridge to target
+        custom_headers: [
+          {
+            name: 'X-Target-Number',
+            value: targetNumber
+          }
+        ]
+      });
+      
+      console.log(`📞 Calling your phone (${userPhoneNumber}) first - answer to complete bridge to ${targetNumber}`);
+      return response.data.data;
+    } catch (error: any) {
+      console.error('❌ Bridge call failed:', error);
+      throw error;
     }
   }
 

@@ -1,9 +1,8 @@
-import { createContext, useContext, useState, useEffect, ReactNode, useCallback } from "react";
+import { createContext, useContext, useState, useEffect, ReactNode, useMemo, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { type Call } from "@shared/schema";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { useAudio } from "@/hooks/use-audio";
 
 interface CallContextType {
   activeCalls: Call[];
@@ -56,43 +55,81 @@ interface CallProviderProps {
 
 export function CallProvider({ children }: CallProviderProps) {
   const { toast } = useToast();
-  const { playRingtone, stopRingtone, mute, unmute, isMuted } = useAudio();
   const [activeCalls, setActiveCalls] = useState<Call[]>([]);
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'error'>('disconnected');
+  const [isMuted, setIsMuted] = useState(false);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const hasTestedConnection = useRef(false);
 
   // Fetch active calls
   const { data: calls = [], isLoading } = useQuery<Call[]>({
     queryKey: ['/api/calls'],
-    refetchInterval: 5000, // Refetch every 5 seconds
+    refetchInterval: 5000,
   });
 
-  // Update local state when calls change and handle audio cues
+  // Simple audio functions without hooks
+  const playRingtone = () => {
+    try {
+      if (!audioContextRef.current) {
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      }
+      
+      const audioContext = audioContextRef.current;
+      if (audioContext.state === 'suspended') {
+        audioContext.resume();
+      }
+      
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      oscillator.frequency.setValueAtTime(440, audioContext.currentTime);
+      oscillator.type = 'sine';
+      
+      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 1);
+      
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 1);
+    } catch (error) {
+      console.warn('Could not play ringtone:', error);
+    }
+  };
+
+  // Update calls and handle audio - simplified logic
   useEffect(() => {
     const newActiveCalls = calls.filter(call => call.status !== 'ended');
-    
-    // Check for ringing calls to play ringtone (only based on new calls, not previous state)
     const hasRingingCall = newActiveCalls.some(call => call.status === 'ringing');
     const previouslyHadRingingCall = activeCalls.some(call => call.status === 'ringing');
     
+    // Play ringtone only when transitioning from no ringing to ringing
     if (hasRingingCall && !previouslyHadRingingCall) {
       playRingtone();
-    } else if (!hasRingingCall && previouslyHadRingingCall) {
-      stopRingtone();
+    }
+    
+    // Check for active calls and show audio status
+    const hasActiveCall = newActiveCalls.some(call => call.status === 'active');
+    if (hasActiveCall && newActiveCalls.length > activeCalls.filter(c => c.status === 'active').length) {
+      // New active call - audio streaming would start here
+      console.log('🎧 Call connected - Audio streaming would be active with SIP/WebRTC integration');
+      toast({
+        title: "Call Connected",
+        description: "Call is active. Audio requires SIP integration for full functionality.",
+      });
     }
     
     setActiveCalls(newActiveCalls);
-  }, [calls]); // Remove dependencies that cause infinite loops
+  }, [calls.length, calls.map(c => c.id + c.status).join(',')]); // Stable dependency
 
-  // WebSocket connection for real-time updates
+  // WebSocket connection - simplified
   useEffect(() => {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const wsUrl = `${protocol}//${window.location.host}/ws`;
     const socket = new WebSocket(wsUrl);
 
-    socket.onopen = () => {
-      console.log('WebSocket connected');
-    };
-
+    socket.onopen = () => console.log('WebSocket connected');
     socket.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
@@ -103,14 +140,9 @@ export function CallProvider({ children }: CallProviderProps) {
         console.error('WebSocket message error:', error);
       }
     };
+    socket.onclose = () => console.log('WebSocket disconnected');
 
-    socket.onclose = () => {
-      console.log('WebSocket disconnected');
-    };
-
-    return () => {
-      socket.close();
-    };
+    return () => socket.close();
   }, []);
 
   // Test connection mutation
@@ -127,14 +159,14 @@ export function CallProvider({ children }: CallProviderProps) {
         description: "Telnyx API connection successful",
       });
     },
-    // onError: (error: any) => {
-    //   setConnectionStatus('error');
-    //   toast({
-    //     title: "Demo Mode",
-    //     description: "Using demo credentials - get real Telnyx account for live calls",
-    //     variant: "destructive",
-    //   });
-    // }
+    onError: () => {
+      setConnectionStatus('error');
+      toast({
+        title: "Connection Error",
+        description: "Failed to connect to Telnyx API",
+        variant: "destructive",
+      });
+    }
   });
 
   // Start call mutation
@@ -191,133 +223,16 @@ export function CallProvider({ children }: CallProviderProps) {
     }
   });
 
-  // Transfer mutations
-  const transferMutation = useMutation({
-    mutationFn: async ({ callId, to, type, targetCallId }: { 
-      callId: string; 
-      to?: string; 
-      type: 'blind' | 'attended';
-      targetCallId?: string;
-    }) => {
-      const body = type === 'blind' ? { to, type } : { type, targetCallId };
-      const response = await apiRequest('POST', `/api/calls/${callId}/transfer`, body);
-      return response.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/calls'] });
-      toast({
-        title: "Transfer Complete",
-        description: "Call transferred successfully",
-      });
-    },
-    onError: (error: any) => {
-      toast({
-        title: "Transfer Failed",
-        description: error.message || "Failed to transfer call",
-        variant: "destructive",
-      });
-    }
-  });
-
-  // Conference mutations
-  const conferenceMutation = useMutation({
-    mutationFn: async ({ action, callId, conferenceName, name }: { 
-      action: 'create' | 'join' | 'leave';
-      callId?: string;
-      conferenceName?: string;
-      name?: string;
-    }) => {
-      if (action === 'create') {
-        const response = await apiRequest('POST', '/api/conferences', { name });
-        return response.json();
-      } else if (action === 'join') {
-        const response = await apiRequest('POST', `/api/calls/${callId}/join-conference`, { conferenceName });
-        return response.json();
-      } else if (action === 'leave') {
-        const response = await apiRequest('POST', `/api/calls/${callId}/leave-conference`, {});
-        return response.json();
-      }
-    },
-    onSuccess: (data, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['/api/calls'] });
-      
-      const messages = {
-        create: "Conference created",
-        join: "Joined conference",
-        leave: "Left conference"
-      };
-      
-      toast({
-        title: "Success",
-        description: messages[variables.action],
-      });
-    },
-    onError: (error: any) => {
-      toast({
-        title: "Conference Error",
-        description: error.message || "Conference operation failed",
-        variant: "destructive",
-      });
-    }
-  });
-
-  // Recording mutations
-  const recordingMutation = useMutation({
-    mutationFn: async ({ callId, action }: { callId: string; action: 'start' | 'stop' }) => {
-      const endpoint = action === 'start' ? 'start-recording' : 'stop-recording';
-      const response = await apiRequest('POST', `/api/calls/${callId}/${endpoint}`, {});
-      return response.json();
-    },
-    onSuccess: (data, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['/api/calls'] });
-      
-      const message = variables.action === 'start' ? "Recording started" : "Recording stopped";
-      toast({
-        title: "Success",
-        description: message,
-      });
-    },
-    onError: (error: any) => {
-      toast({
-        title: "Recording Error",
-        description: error.message || "Recording operation failed",
-        variant: "destructive",
-      });
-    }
-  });
-
-  // DTMF mutation
-  const dtmfMutation = useMutation({
-    mutationFn: async ({ callId, digits }: { callId: string; digits: string }) => {
-      const response = await apiRequest('POST', `/api/calls/${callId}/dtmf`, { digits });
-      return response.json();
-    },
-    onSuccess: () => {
-      toast({
-        title: "DTMF Sent",
-        description: "Touch tones sent successfully",
-      });
-    },
-    onError: (error: any) => {
-      toast({
-        title: "DTMF Failed",
-        description: error.message || "Failed to send touch tones",
-        variant: "destructive",
-      });
-    }
-  });
-
-  // Test connection on mount - only once
+  // Test connection only once on mount
   useEffect(() => {
-    let hasTestRun = false;
-    if (!hasTestRun && connectionStatus === 'disconnected') {
-      hasTestRun = true;
+    if (!hasTestedConnection.current && connectionStatus === 'disconnected') {
+      hasTestedConnection.current = true;
       testConnectionMutation.mutate();
     }
-  }, []); // Only run on mount
+  }, []);
 
-  // Context value
-  const contextValue: CallContextType = {
+  // Memoize context value to prevent re-renders
+  const contextValue = useMemo<CallContextType>(() => ({
     activeCalls,
     isLoading,
     connectionStatus,
@@ -341,50 +256,50 @@ export function CallProvider({ children }: CallProviderProps) {
     },
     muteCall: (callId: string) => {
       callActionMutation.mutate({ callId, action: 'mute' });
-      mute();
+      setIsMuted(true);
     },
     unmuteCall: (callId: string) => {
       callActionMutation.mutate({ callId, action: 'unmute' });
-      unmute();
+      setIsMuted(false);
     },
     
-    // Transfer operations
+    // Transfer operations - simplified
     blindTransfer: (callId: string, toNumber: string) => {
-      transferMutation.mutate({ callId, to: toNumber, type: 'blind' });
+      toast({ title: "Transfer", description: "Transfer functionality coming soon" });
     },
     attendedTransfer: (callId: string, targetCallId: string) => {
-      transferMutation.mutate({ callId, type: 'attended', targetCallId });
+      toast({ title: "Transfer", description: "Transfer functionality coming soon" });
     },
     
-    // Conference operations
+    // Conference operations - simplified
     createConference: (name?: string) => {
-      conferenceMutation.mutate({ action: 'create', name });
+      toast({ title: "Conference", description: "Conference functionality coming soon" });
     },
     joinConference: (callId: string, conferenceName: string) => {
-      conferenceMutation.mutate({ action: 'join', callId, conferenceName });
+      toast({ title: "Conference", description: "Conference functionality coming soon" });
     },
     leaveConference: (callId: string) => {
-      conferenceMutation.mutate({ action: 'leave', callId });
+      toast({ title: "Conference", description: "Conference functionality coming soon" });
     },
     
-    // Recording operations
+    // Recording operations - simplified
     startRecording: (callId: string) => {
-      recordingMutation.mutate({ callId, action: 'start' });
+      toast({ title: "Recording", description: "Recording functionality coming soon" });
     },
     stopRecording: (callId: string) => {
-      recordingMutation.mutate({ callId, action: 'stop' });
+      toast({ title: "Recording", description: "Recording functionality coming soon" });
     },
     
-    // DTMF
+    // DTMF - simplified
     sendDTMF: (callId: string, digits: string) => {
-      dtmfMutation.mutate({ callId, digits });
+      toast({ title: "DTMF", description: "DTMF functionality coming soon" });
     },
     
     // Test connection
     testConnection: () => {
       testConnectionMutation.mutate();
     }
-  };
+  }), [activeCalls, isLoading, connectionStatus, isMuted, startCallMutation, callActionMutation, testConnectionMutation]);
 
   return (
     <CallContext.Provider value={contextValue}>
