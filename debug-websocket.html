@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebSocket Debug Test</title>
+</head>
+<body>
+    <h1>WebSocket Connection Test</h1>
+    <div id="log"></div>
+    
+    <script>
+        function log(message) {
+            const logDiv = document.getElementById('log');
+            logDiv.innerHTML += '<div>' + new Date().toISOString() + ': ' + message + '</div>';
+            console.log(message);
+        }
+        
+        log('Starting WebSocket connection test...');
+        log('Current location: ' + window.location.href);
+        log('Hostname: ' + window.location.hostname);
+        log('Port: ' + window.location.port);
+        log('Protocol: ' + window.location.protocol);
+        
+        const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+        let host = window.location.hostname;
+        
+        // Clean up any malformed hostnames with tokens
+        if (host.includes('/') || host.includes('?') || host.includes('token=')) {
+            host = host.split('/')[0].split('?')[0];
+        }
+        
+        const port = window.location.port || '5000';
+        const wsUrl = `${protocol}//${host}:${port}/ws/telnyx-media`;
+        
+        log('Attempting to connect to: ' + wsUrl);
+        
+        const ws = new WebSocket(wsUrl);
+        
+        ws.onopen = function() {
+            log('✅ WebSocket connected successfully!');
+        };
+        
+        ws.onerror = function(error) {
+            log('❌ WebSocket error: ' + JSON.stringify(error));
+        };
+        
+        ws.onclose = function(event) {
+            log('WebSocket closed. Code: ' + event.code + ', Reason: ' + event.reason);
+        };
+        
+        ws.onmessage = function(event) {
+            log('Received message: ' + event.data);
+        };
+    </script>
+</body>
+</html>

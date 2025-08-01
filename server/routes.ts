@@ -1,19 +1,37 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
+import path from "path";
 import { storage } from "./storage";
 import { insertCallSchema, insertTelnyxConfigSchema } from "@shared/schema";
-import { telnyxClient } from "./telnyx-client.js";
-import { TelnyxMediaHandler } from "./telnyx-media.js";
+import { telnyxClient } from "./telnyx-client.ts";
+import { TelnyxMediaHandler } from "./telnyx-media.ts";
 
 export function registerRoutes(app: Express): Server {
   const httpServer = createServer(app);
   
   // Initialize Telnyx Media Handler for official WebSocket streaming
+  console.log('Initializing Telnyx Media Handler...');
   const telnyxMediaHandler = new TelnyxMediaHandler(httpServer);
+  console.log('Telnyx Media Handler initialized successfully');
 
   // Helper functions
   const getCallControlId = (metadata: any): string | undefined => metadata?.telnyxCallControlId;
   const updateMetadata = (existing: any, updates: any): any => ({ ...existing, ...updates });
+
+  // Add debug endpoint for WebSocket testing
+  app.get("/debug-ws", (req, res) => {
+    res.sendFile(path.join(process.cwd(), 'debug-websocket.html'));
+  });
+
+  // Add WebSocket connection test endpoint
+  app.get("/api/ws-test", (req, res) => {
+    res.json({
+      wsUrl: `ws://${req.get('host')}/ws/telnyx-media`,
+      host: req.get('host'),
+      protocol: req.protocol,
+      port: process.env.PORT || '5000'
+    });
+  });
 
   app.get("/api/calls", async (req, res) => {
     try {
@@ -361,7 +379,7 @@ export function registerRoutes(app: Express): Server {
       const streamingConfig = telnyxMediaHandler.getTelnyxStreamingConfig(track);
       
       // Start media stream
-      const streamId = telnyxMediaHandler.startMediaStream(callControlId, streamingConfig, {
+      const streamId = await telnyxMediaHandler.startMediaStream(callControlId, streamingConfig, {
         encoding: codec,
         sample_rate: 8000,
         channels: 1

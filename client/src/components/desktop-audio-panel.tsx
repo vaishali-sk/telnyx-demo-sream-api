@@ -13,7 +13,7 @@ import {
   CheckCircle,
   Info
 } from "lucide-react";
-import { useDesktopAudio } from "@/hooks/use-desktop-audio";
+import { useTelnyxMedia } from "@/hooks/use-telnyx-media";
 import { type Call } from "@shared/schema";
 
 interface DesktopAudioPanelProps {
@@ -21,32 +21,27 @@ interface DesktopAudioPanelProps {
 }
 
 export function DesktopAudioPanel({ activeCall }: DesktopAudioPanelProps) {
-  const {
-    isConnected,
-    isStreaming,
-    audioLevel,
-    startAudioStream,
-    stopAudioStream,
-    toggleMute,
-    isMuted,
-    error
-  } = useDesktopAudio();
+  const telnyxMedia = useTelnyxMedia(activeCall?.id);
 
   const handleStartStream = () => {
     if (activeCall) {
-      startAudioStream(activeCall.id);
+      telnyxMedia.startMediaStream('both_tracks');
     }
   };
 
+  const handleStopStream = () => {
+    telnyxMedia.stopMediaStream();
+  };
+
   const getConnectionBadge = () => {
-    if (error) return <Badge variant="destructive">Error</Badge>;
-    if (isConnected) return <Badge variant="default">Connected</Badge>;
+    if (telnyxMedia.error) return <Badge variant="destructive">Error</Badge>;
+    if (telnyxMedia.isConnected) return <Badge variant="default">Connected</Badge>;
     return <Badge variant="secondary">Disconnected</Badge>;
   };
 
   const getConnectionIcon = () => {
-    if (error) return <AlertTriangle className="w-4 h-4 text-red-500" />;
-    if (isConnected) return <CheckCircle className="w-4 h-4 text-green-500" />;
+    if (telnyxMedia.error) return <AlertTriangle className="w-4 h-4 text-red-500" />;
+    if (telnyxMedia.isConnected) return <CheckCircle className="w-4 h-4 text-green-500" />;
     return <Info className="w-4 h-4 text-gray-500" />;
   };
 
@@ -67,8 +62,8 @@ export function DesktopAudioPanel({ activeCall }: DesktopAudioPanelProps) {
         <div className="flex items-center gap-2">
           {getConnectionIcon()}
           <span className="text-sm">
-            {error ? error :
-             isConnected ? 'WebSocket connected - ready for audio' :
+            {telnyxMedia.error ? telnyxMedia.error :
+             telnyxMedia.isConnected ? 'WebSocket connected - ready for audio' :
              'Connecting to audio server...'}
           </span>
         </div>
@@ -83,14 +78,14 @@ export function DesktopAudioPanel({ activeCall }: DesktopAudioPanelProps) {
           </Alert>
         )}
 
-        {/* Audio Controls */}
-        {activeCall && activeCall.status === 'active' && (
+        {/* Audio Controls - Allow testing during ringing for debugging */}
+        {activeCall && (activeCall.status === 'active' || activeCall.status === 'ringing') && (
           <div className="space-y-3">
             <div className="flex gap-2">
-              {!isStreaming ? (
+              {!telnyxMedia.isStreaming ? (
                 <Button 
                   onClick={handleStartStream}
-                  disabled={!isConnected}
+                  disabled={!telnyxMedia.isConnected}
                   className="flex-1"
                 >
                   <Radio className="w-4 h-4 mr-2" />
@@ -98,7 +93,7 @@ export function DesktopAudioPanel({ activeCall }: DesktopAudioPanelProps) {
                 </Button>
               ) : (
                 <Button 
-                  onClick={stopAudioStream}
+                  onClick={handleStopStream}
                   variant="destructive"
                   className="flex-1"
                 >
@@ -107,28 +102,28 @@ export function DesktopAudioPanel({ activeCall }: DesktopAudioPanelProps) {
                 </Button>
               )}
               
-              {isStreaming && (
+              {telnyxMedia.isStreaming && (
                 <Button
-                  onClick={toggleMute}
-                  variant={isMuted ? "destructive" : "outline"}
+                  onClick={telnyxMedia.toggleMute}
+                  variant={telnyxMedia.isMuted ? "destructive" : "outline"}
                   size="icon"
                 >
-                  {isMuted ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                  {telnyxMedia.isMuted ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
                 </Button>
               )}
             </div>
 
             {/* Audio Level Indicator */}
-            {isStreaming && (
+            {telnyxMedia.isStreaming && (
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
                   <Activity className="w-4 h-4" />
                   <span className="text-sm">
-                    Microphone Level: {audioLevel}%
-                    {isMuted && <span className="text-red-500 ml-2">(Muted)</span>}
+                    Microphone Level: {telnyxMedia.audioLevel}%
+                    {telnyxMedia.isMuted && <span className="text-red-500 ml-2">(Muted)</span>}
                   </span>
                 </div>
-                <Progress value={audioLevel} className="w-full" />
+                <Progress value={telnyxMedia.audioLevel} className="w-full" />
               </div>
             )}
           </div>
@@ -142,7 +137,7 @@ export function DesktopAudioPanel({ activeCall }: DesktopAudioPanelProps) {
         )}
 
         {/* Call Not Active */}
-        {activeCall && activeCall.status !== 'active' && (
+        {activeCall && activeCall.status !== 'active' && activeCall.status !== 'ringing' && (
           <div className="text-sm text-muted-foreground text-center py-4">
             Call must be active to start audio streaming
             <br />
@@ -162,11 +157,11 @@ export function DesktopAudioPanel({ activeCall }: DesktopAudioPanelProps) {
         </div>
 
         {/* Technical Status */}
-        {isStreaming && (
+        {telnyxMedia.isStreaming && (
           <div className="text-xs text-gray-500 border-t pt-2">
-            <div>WebSocket: {isConnected ? 'Connected' : 'Disconnected'}</div>
-            <div>Audio Stream: {isStreaming ? 'Active' : 'Inactive'}</div>
-            <div>Microphone: {isMuted ? 'Muted' : 'Active'}</div>
+            <div>WebSocket: {telnyxMedia.isConnected ? 'Connected' : 'Disconnected'}</div>
+            <div>Audio Stream: {telnyxMedia.isStreaming ? 'Active' : 'Inactive'}</div>
+            <div>Microphone: {telnyxMedia.isMuted ? 'Muted' : 'Active'}</div>
           </div>
         )}
       </CardContent>

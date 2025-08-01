@@ -38,9 +38,14 @@ export function useDesktopAudio(config: AudioStreamConfig = {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
 
     try {
-      // Connect to WebSocket audio server
+      // DEPRECATED: This hook is no longer used - replaced by useTelnyxMedia
+      // Connect to WebSocket audio server  
       const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const wsUrl = `${protocol}//${window.location.host}/ws/audio`;
+      let hostname = window.location.hostname;
+      if (hostname.includes('/') || hostname.includes('?') || hostname.includes('token=')) {
+        hostname = hostname.split('/')[0].split('?')[0];
+      }
+      const wsUrl = `${protocol}//${hostname}:5000/ws/audio`;
       
       wsRef.current = new WebSocket(wsUrl);
       

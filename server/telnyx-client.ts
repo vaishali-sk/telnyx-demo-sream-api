@@ -35,23 +35,20 @@ export class TelnyxClient {
     this.webhookUrl = 'https://54cdb265ccf9.ngrok-free.app/webhooks/calls';
   }
 
-  // Call Management with Bridge Mode for Audio
+  // Call Management with Media Streaming support
   async createCall(to: string, from?: string): Promise<TelnyxCall> {
     try {
-      // For audio to work, we need to implement bridge mode:
-      // 1. First call your phone number
-      // 2. When you answer, bridge to the target number
-      // This gives you audio through your physical phone
-      
       const response = await this.api.post('/calls', {
         to,
         from: from || TELNYX_CONFIG.FROM_NUMBER,
         connection_id: TELNYX_CONFIG.APPLICATION_ID,
         webhook_url: this.webhookUrl,
         webhook_url_method: 'POST',
-        // Add answer URL for bridge mode
-        answer_url: `${this.webhookUrl}/answer`,
-        answer_method: 'POST'
+        // Enable media streaming for this call
+        stream_url: `wss://${process.env.REPLIT_DOMAIN || 'localhost:5000'}/ws/telnyx-media`,
+        stream_track: 'both_tracks',
+        send_silence_when_idle: true,
+        audio_codec: 'PCMU'
       });
       return response.data.data;
     } catch (error: any) {
