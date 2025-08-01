@@ -10,7 +10,15 @@ import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { type TelnyxConfig } from "@shared/schema";
 import { CheckCircle, AlertCircle, Loader2 } from "lucide-react";
-import {TELNYX_CONFIG} from "../../../telnyx-config";
+// Default configuration values - will be overridden by server data
+const DEFAULT_CONFIG = {
+  API_KEY: '',
+  APPLICATION_ID: '',
+  SIP_CONNECTION_ID: '',
+  USERNAME: '',
+  PASSWORD: '',
+  FROM_NUMBER: ''
+};
 
 export function Settings() {
   const { toast } = useToast();
@@ -21,12 +29,12 @@ export function Settings() {
   });
 
   const [formData, setFormData] = useState({
-    apiKey: TELNYX_CONFIG.API_KEY,
-    applicationId: TELNYX_CONFIG.APPLICATION_ID,
-    sipConnectionId: TELNYX_CONFIG.SIP_CONNECTION_ID,
-    username: TELNYX_CONFIG.USERNAME,
-    password: TELNYX_CONFIG.PASSWORD,
-    fromNumber: TELNYX_CONFIG.FROM_NUMBER
+    apiKey: DEFAULT_CONFIG.API_KEY,
+    applicationId: DEFAULT_CONFIG.APPLICATION_ID,
+    sipConnectionId: DEFAULT_CONFIG.SIP_CONNECTION_ID,
+    username: DEFAULT_CONFIG.USERNAME,
+    password: DEFAULT_CONFIG.PASSWORD,
+    fromNumber: DEFAULT_CONFIG.FROM_NUMBER
   });
 
   const saveConfigMutation = useMutation({
@@ -74,12 +82,12 @@ export function Settings() {
   useEffect(() => {
     if (telnyxConfig) {
       setFormData({
-        apiKey: TELNYX_CONFIG.API_KEY,
-        applicationId: TELNYX_CONFIG.APPLICATION_ID,
-        sipConnectionId: TELNYX_CONFIG.SIP_CONNECTION_ID,
-        username: TELNYX_CONFIG.USERNAME,
-        password: TELNYX_CONFIG.PASSWORD,
-        fromNumber: TELNYX_CONFIG.FROM_NUMBER
+        apiKey: telnyxConfig.apiKey || DEFAULT_CONFIG.API_KEY,
+        applicationId: telnyxConfig.applicationId || DEFAULT_CONFIG.APPLICATION_ID,
+        sipConnectionId: telnyxConfig.sipConnectionId || DEFAULT_CONFIG.SIP_CONNECTION_ID,
+        username: telnyxConfig.username || DEFAULT_CONFIG.USERNAME,
+        password: telnyxConfig.password || DEFAULT_CONFIG.PASSWORD,
+        fromNumber: telnyxConfig.fromNumber || DEFAULT_CONFIG.FROM_NUMBER
       });
     }
   }, [telnyxConfig]);
@@ -98,12 +106,12 @@ export function Settings() {
 
   const handleResetToDefaults = () => {
     setFormData({
-      apiKey: TELNYX_CONFIG.API_KEY,
-      applicationId: TELNYX_CONFIG.APPLICATION_ID,
-      sipConnectionId: TELNYX_CONFIG.SIP_CONNECTION_ID,
-      username: TELNYX_CONFIG.USERNAME,
-      password: TELNYX_CONFIG.PASSWORD,
-      fromNumber: TELNYX_CONFIG.FROM_NUMBER
+      apiKey: DEFAULT_CONFIG.API_KEY,
+      applicationId: DEFAULT_CONFIG.APPLICATION_ID,
+      sipConnectionId: DEFAULT_CONFIG.SIP_CONNECTION_ID,
+      username: DEFAULT_CONFIG.USERNAME,
+      password: DEFAULT_CONFIG.PASSWORD,
+      fromNumber: DEFAULT_CONFIG.FROM_NUMBER
     });
   };
 

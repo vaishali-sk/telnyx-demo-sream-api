@@ -1,5 +1,5 @@
 import axios, { AxiosInstance } from "axios";
-import { TELNYX_CONFIG } from "../telnyx-config.js";
+import { TELNYX_CONFIG } from "../telnyx-config.ts";
 
 export interface TelnyxCall {
   call_control_id: string;

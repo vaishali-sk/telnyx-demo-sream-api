@@ -4,9 +4,13 @@ import { WebSocketServer, WebSocket } from "ws";
 import { storage } from "./storage";
 import { insertCallSchema, insertTelnyxConfigSchema } from "@shared/schema";
 import { telnyxClient } from "./telnyx-client.js";
+import { AudioStreamingManager } from "./websocket-audio";
 
 export function registerRoutes(app: Express): Server {
   const httpServer = createServer(app);
+  
+  // Initialize WebSocket audio streaming for desktop functionality
+  const audioStreaming = new AudioStreamingManager(httpServer);
 
   // Helper functions
   const getCallControlId = (metadata: any): string | undefined => metadata?.telnyxCallControlId;
@@ -332,127 +336,16 @@ export function registerRoutes(app: Express): Server {
     }
   });
 
-  // SIP Call Management Endpoints
-  app.post('/api/sip/calls', async (req, res) => {
+  // WebSocket Audio Streaming Endpoint (for future Electron integration)
+  app.post('/api/audio/stream', async (req, res) => {
     try {
-      const { toNumber, fromNumber } = req.body;
-      const { sipClient } = await import('./sip-client');
-      
-      const sipCall = await sipClient.makeCall(toNumber, fromNumber);
-      
-      // Also create a record in our storage for tracking
-      const call = await storage.createCall({
-        toNumber,
-        fromNumber: fromNumber || '',
-        status: 'ringing',
-        metadata: { sipCallId: sipCall.id, isSipCall: true }
-      });
-
-      res.json({
-        ...sipCall,
-        callRecordId: call.id
-      });
+      const { callId, audioData } = req.body;
+      // TODO: Implement WebSocket audio streaming for desktop app
+      // This will handle bidirectional audio streaming for Electron
+      res.json({ success: true, message: "Audio streaming not yet implemented" });
     } catch (error) {
-      console.error('Failed to create SIP call:', error);
-      res.status(500).json({ message: "Failed to create SIP call" });
-    }
-  });
-
-  app.post('/api/sip/calls/:id/answer', async (req, res) => {
-    try {
-      const { id } = req.params;
-      const { sipClient } = await import('./sip-client');
-      
-      await sipClient.answerCall(id);
-      res.json({ success: true, message: "Call answered" });
-    } catch (error) {
-      console.error('Failed to answer SIP call:', error);
-      res.status(500).json({ message: "Failed to answer call" });
-    }
-  });
-
-  app.post('/api/sip/calls/:id/hangup', async (req, res) => {
-    try {
-      const { id } = req.params;
-      const { sipClient } = await import('./sip-client');
-      
-      await sipClient.hangupCall(id);
-      res.json({ success: true, message: "Call ended" });
-    } catch (error) {
-      console.error('Failed to hangup SIP call:', error);
-      res.status(500).json({ message: "Failed to hangup call" });
-    }
-  });
-
-  app.post('/api/sip/calls/:id/hold', async (req, res) => {
-    try {
-      const { id } = req.params;
-      const { sipClient } = await import('./sip-client');
-      
-      await sipClient.holdCall(id);
-      res.json({ success: true, message: "Call held" });
-    } catch (error) {
-      console.error('Failed to hold SIP call:', error);
-      res.status(500).json({ message: "Failed to hold call" });
-    }
-  });
-
-  app.post('/api/sip/calls/:id/transfer', async (req, res) => {
-    try {
-      const { id } = req.params;
-      const { to } = req.body;
-      const { sipClient } = await import('./sip-client');
-      
-      await sipClient.blindTransfer(id, to);
-      res.json({ success: true, message: "Transfer initiated" });
-    } catch (error) {
-      console.error('Failed to transfer SIP call:', error);
-      res.status(500).json({ message: "Failed to transfer call" });
-    }
-  });
-
-  app.post('/api/sip/conferences', async (req, res) => {
-    try {
-      const { name } = req.body;
-      const { sipClient } = await import('./sip-client');
-      
-      const conferenceId = await sipClient.createConference(name);
-      res.json({ conferenceId, name, participants: 0 });
-    } catch (error) {
-      console.error('Failed to create SIP conference:', error);
-      res.status(500).json({ message: "Failed to create conference" });
-    }
-  });
-
-  app.post('/api/sip/calls/:id/conference', async (req, res) => {
-    try {
-      const { id } = req.params;
-      const { conferenceId } = req.body;
-      const { sipClient } = await import('./sip-client');
-      
-      await sipClient.addToConference(id, conferenceId);
-      res.json({ success: true, message: "Added to conference" });
-    } catch (error) {
-      console.error('Failed to add to SIP conference:', error);
-      res.status(500).json({ message: "Failed to join conference" });
-    }
-  });
-
-  app.get('/api/sip/status', async (req, res) => {
-    try {
-      const { sipClient } = await import('./sip-client');
-      
-      res.json({
-        registered: sipClient.isRegistered(),
-        activeCalls: sipClient.getActiveCalls(),
-        conferences: Array.from(sipClient.getConferences().entries()).map(([id, participants]) => ({
-          id,
-          participants: participants.length
-        }))
-      });
-    } catch (error) {
-      console.error('Failed to get SIP status:', error);
-      res.status(500).json({ message: "Failed to get SIP status" });
+      console.error('Failed to stream audio:', error);
+      res.status(500).json({ message: "Failed to stream audio" });
     }
   });
 

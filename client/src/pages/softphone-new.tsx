@@ -3,17 +3,21 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { AudioBridgeDialer } from "@/components/audio-bridge-dialer";
+import { SimpleDialer } from "@/components/simple-dialer";
 import { ActiveCallsNew } from "@/components/active-calls-new";
 import { Settings } from "@/components/settings";
 import { ConnectionStatus } from "@/components/connection-status";
+import { DesktopAudioPanel } from "@/components/desktop-audio-panel";
 
-import { useCallContext } from "@/contexts/call-context-stable";
-import { Phone, Settings as SettingsIcon, Users, History } from "lucide-react";
+import { useCallContext } from "@/contexts/api-call-context";
+import { Phone, Settings as SettingsIcon, Users, History, Headphones } from "lucide-react";
 
 export default function SoftphoneNew() {
   const [activeTab, setActiveTab] = useState("dialer");
+  const [isAudioStreaming, setIsAudioStreaming] = useState(false);
   const { activeCalls, testConnection, connectionStatus } = useCallContext();
+  
+  const activeCall = activeCalls.length > 0 ? activeCalls[0] : null;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -45,10 +49,14 @@ export default function SoftphoneNew() {
           {/* Left Panel - Dialer and Controls */}
           <div className="lg:col-span-1">
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-              <TabsList className="grid w-full grid-cols-2">
+              <TabsList className="grid w-full grid-cols-3">
                 <TabsTrigger value="dialer">
                   <Phone className="w-4 h-4 mr-2" />
                   Dialer
+                </TabsTrigger>
+                <TabsTrigger value="audio">
+                  <Headphones className="w-4 h-4 mr-2" />
+                  Audio
                 </TabsTrigger>
                 <TabsTrigger value="settings">
                   <SettingsIcon className="w-4 h-4 mr-2" />
@@ -57,7 +65,11 @@ export default function SoftphoneNew() {
               </TabsList>
               
               <TabsContent value="dialer" className="mt-4">
-                <AudioBridgeDialer />
+                <SimpleDialer />
+              </TabsContent>
+              
+              <TabsContent value="audio" className="mt-4">
+                <DesktopAudioPanel activeCall={activeCall} />
               </TabsContent>
               
               <TabsContent value="settings" className="mt-4">

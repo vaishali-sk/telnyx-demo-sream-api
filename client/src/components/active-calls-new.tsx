@@ -13,22 +13,18 @@ import {
   Circle,
   Square
 } from "lucide-react";
-import { useCallContext } from "@/contexts/call-context-stable";
+import { useCallContext } from "@/contexts/api-call-context";
 import { formatDistanceToNow } from "date-fns";
 
 export function ActiveCallsNew() {
   const { 
     activeCalls, 
-    hangupCall, 
+    endCall, 
     holdCall, 
     resumeCall, 
     muteCall, 
     unmuteCall,
-    blindTransfer,
-    createConference,
-    joinConference,
-    startRecording,
-    stopRecording,
+    transferCall,
     sendDTMF
   } = useCallContext();
 
@@ -50,7 +46,7 @@ export function ActiveCallsNew() {
   const handleTransfer = (callId: string) => {
     const transferTo = prompt("Transfer to number:");
     if (transferTo) {
-      blindTransfer(callId, transferTo);
+      transferCall(callId, transferTo);
     }
   };
 
@@ -61,32 +57,17 @@ export function ActiveCallsNew() {
     }
   };
 
-  const handleConference = () => {
-    const conferenceName = `conf_${Date.now()}`;
-    createConference(conferenceName);
-    
-    // Join all active calls to the conference
-    activeCalls.forEach(call => {
-      if (call.status === 'active') {
-        joinConference(call.id, conferenceName);
-      }
-    });
-  };
+  // Conference functionality temporarily disabled for API-only implementation
 
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
         <CardTitle>Active Calls ({activeCalls.length})</CardTitle>
-        {activeCalls.length > 1 && (
-          <Button onClick={handleConference} size="sm">
-            <Users className="w-4 h-4 mr-2" />
-            Conference
-          </Button>
-        )}
+
       </CardHeader>
       <CardContent className="space-y-4">
         {activeCalls.map((call) => {
-          const isRecording = call.metadata?.isRecording;
+          // Recording functionality will be available in desktop version
           const duration = call.startTime ? 
             formatDistanceToNow(new Date(call.startTime), { addSuffix: false }) : 
             '0m';
@@ -121,7 +102,7 @@ export function ActiveCallsNew() {
               <div className="flex flex-wrap gap-2">
                 {/* Basic call controls */}
                 <Button
-                  onClick={() => hangupCall(call.id)}
+                  onClick={() => endCall(call.id)}
                   variant="destructive"
                   size="sm"
                 >
@@ -180,28 +161,6 @@ export function ActiveCallsNew() {
                   <ArrowRightLeft className="w-4 h-4 mr-1" />
                   Transfer
                 </Button>
-
-                {/* Recording controls */}
-                {isRecording ? (
-                  <Button
-                    onClick={() => stopRecording(call.id)}
-                    variant="outline"
-                    size="sm"
-                    className="text-red-600"
-                  >
-                    <Square className="w-4 h-4 mr-1" />
-                    Stop Rec
-                  </Button>
-                ) : (
-                  <Button
-                    onClick={() => startRecording(call.id)}
-                    variant="outline"
-                    size="sm"
-                  >
-                    <Circle className="w-4 h-4 mr-1" />
-                    Record
-                  </Button>
-                )}
 
                 {/* DTMF */}
                 <Button

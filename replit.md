@@ -2,17 +2,17 @@
 
 ## Overview
 
-This is a full-stack Telnyx softphone application built with React, Express, and TypeScript. The application provides a web-based softphone interface for making and receiving **real phone calls** through the Telnyx WebRTC platform. It features a modern UI built with shadcn/ui components, uses in-memory storage for development, and integrates the actual Telnyx WebRTC SDK for live calling functionality.
+This is a full-stack Telnyx softphone application built with React, Express, and TypeScript. The application provides a desktop-ready softphone interface for making and receiving **real phone calls** through the Telnyx Call Control API without WebRTC dependencies. It features WebSocket audio streaming for desktop applications, a modern UI built with shadcn/ui components, uses in-memory storage for development, and integrates the Telnyx API for live calling functionality optimized for Electron deployment.
 
 ## Recent Changes (Latest)
 
-- **Real Telnyx WebRTC Integration**: Integrated actual Telnyx WebRTC SDK for making real phone calls
-- **Audio Handling**: Fixed audio playback by properly routing remote streams to HTML5 audio elements  
-- **Call State Management**: Implemented proper call event handling using addEventListener for state changes
-- **Microphone Permissions**: Added automatic microphone permission requests for calling functionality
-- **Mute/Unmute Controls**: Added working mute and unmute functionality using Telnyx call methods
-- **Connection Status**: Real-time connection status showing actual Telnyx connectivity
-- **Pre-configured Credentials**: User's Telnyx credentials pre-loaded for immediate use
+- **WebRTC Removal**: Completely removed WebRTC dependencies and browser-based audio components
+- **API-Only Architecture**: Migrated to pure Telnyx API calling without WebRTC for desktop compatibility
+- **WebSocket Audio Streaming**: Implemented server-side WebSocket audio streaming manager for desktop apps
+- **Desktop Audio Component**: Created desktop-specific audio streaming interface with microphone/speaker support
+- **Simplified Call Context**: Streamlined call management using only Telnyx Call Control API
+- **Clean Dependencies**: Removed @telnyx/webrtc and other browser-specific audio libraries
+- **Electron-Ready Design**: Architecture optimized for desktop Electron application deployment
 
 ## User Preferences
 
