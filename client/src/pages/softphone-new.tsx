@@ -7,6 +7,7 @@ import { SimpleDialer } from "@/components/simple-dialer";
 import { ActiveCallsNew } from "@/components/active-calls-new";
 import { Settings } from "@/components/settings";
 import { ConnectionStatus } from "@/components/connection-status";
+import { HttpAudioHandler } from "@/components/http-audio-handler";
 
 
 import { useCallContext } from "@/contexts/api-call-context";
@@ -73,8 +74,12 @@ export default function SoftphoneNew() {
           </div>
 
           {/* Right Panel - Active Calls */}
-          <div className="lg:col-span-2">
+          <div className="lg:col-span-2 space-y-6">
             <ActiveCallsNew />
+            <HttpAudioHandler 
+              callId={activeCall?.callId} 
+              isCallActive={activeCalls.length > 0} 
+            />
           </div>
         </div>
 

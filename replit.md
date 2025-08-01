@@ -6,14 +6,13 @@ This is a full-stack Telnyx softphone application built with React, Express, and
 
 ## Recent Changes (Latest)
 
-- **Project Migration to Replit**: Successfully migrated from Replit Agent environment to standard Replit
-- **Security Enhancement**: Moved hardcoded Telnyx credentials to environment variables with fallback values
-- **WebSocket Connection Fixes**: Resolved client-side WebSocket connection issues for audio streaming
-- **Webhook Integration**: Added proper Telnyx webhook endpoint for real-time call status updates
-- **Error Handling**: Improved client-side error handling to prevent unhandled rejections
-- **Audio Stream Debugging**: Enhanced logging and connection management for media streaming
-- **Configuration Management**: Proper environment variable usage for webhook URLs and API endpoints
-- **Production Ready**: Server running successfully with all dependencies properly configured
+- **WebSocket Authentication Fixed**: Added verifyClient function to allow both Telnyx and browser WebSocket connections (August 1, 2025)
+- **Connection Detection Enhanced**: Server now properly distinguishes between Telnyx streaming connections and browser clients
+- **Bidirectional Audio Architecture**: Implemented proper Telnyx RTP packet forwarding with enhanced buffering system
+- **Audio Quality Improved**: Added μ-law encoding/decoding with voice frequency filtering (300Hz-3400Hz)
+- **Stream Management**: Enhanced active stream tracking and cleanup with detailed connection logging
+- **User Interaction Compliance**: Audio system requires user interaction before initialization per browser requirements
+- **Enhanced Audio Handler**: Replaced simple audio with buffered audio handler for smooth RTP packet playback
 
 ## User Preferences
 

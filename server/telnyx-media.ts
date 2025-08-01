@@ -54,16 +54,28 @@ export class TelnyxMediaHandler extends EventEmitter {
   private streamConfigs: Map<string, TelnyxMediaConfig> = new Map();
   private telnyxConnections: Map<string, WebSocket> = new Map();
   private clientConnections: Set<WebSocket> = new Set();
+  private audioBridge: any = null;
 
   constructor(private httpServer: Server) {
     super();
     this.setupWebSocketServer();
   }
 
+  // Set audio bridge reference for HTTP streaming
+  setAudioBridge(audioBridge: any): void {
+    this.audioBridge = audioBridge;
+    console.log('🔗 Audio bridge connected to media handler');
+  }
+
   private setupWebSocketServer() {
     this.wsServer = new WebSocketServer({ 
       server: this.httpServer, 
-      path: '/ws/telnyx-media' 
+      path: '/ws/telnyx-media',
+      verifyClient: (info: any) => {
+        // Allow all WebSocket connections - both Telnyx and browser clients
+        console.log(`🔍 WebSocket connection attempt from: ${info.origin || 'no-origin'} - ${info.req.socket.remoteAddress}`);
+        return true;
+      }
     });
 
     console.log('WebSocket server initialized on path: /ws/telnyx-media');
@@ -74,11 +86,46 @@ export class TelnyxMediaHandler extends EventEmitter {
       // Track this client connection
       this.clientConnections.add(ws);
       
-      // Send connected event immediately
-      ws.send(JSON.stringify({
-        event: 'connected',
-        version: '1.0.0'
-      }));
+      // Determine connection type based on headers and origin
+      const userAgent = req.headers['user-agent'] || '';
+      const origin = req.headers.origin || '';
+      const host = req.headers.host || '';
+      
+      console.log(`🔍 Connection details: User-Agent: ${userAgent}, Origin: ${origin}, Host: ${host}`);
+      
+      // Telnyx connections typically come without origin header or with specific user agents
+      const isTelnyxConnection = !origin || 
+                                userAgent.toLowerCase().includes('telnyx') || 
+                                userAgent.toLowerCase().includes('websocket') ||
+                                userAgent === '' ||
+                                req.socket.remoteAddress?.includes('telnyx');
+      
+      console.log(`🔍 Connection type detection: isTelnyxConnection=${isTelnyxConnection}`);
+      
+      if (isTelnyxConnection) {
+        // This is likely a Telnyx streaming connection
+        const streamId = this.generateStreamId();
+        this.activeStreams.set(streamId, ws);
+        console.log(`📡 Registered Telnyx streaming connection: ${streamId}`);
+        console.log(`📊 Total active Telnyx streams: ${this.activeStreams.size}`);
+        
+        // Send Telnyx-specific connected event
+        ws.send(JSON.stringify({
+          event: 'connected',
+          version: '1.0.0',
+          stream_id: streamId
+        }));
+      } else {
+        // This is a browser client connection
+        console.log('🌐 Browser client connected for audio streaming');
+        
+        // Send browser-specific connected event
+        ws.send(JSON.stringify({
+          event: 'connected',
+          version: '1.0.0',
+          client_type: 'browser'
+        }));
+      }
 
       ws.on('message', async (message) => {
         try {
@@ -100,7 +147,12 @@ export class TelnyxMediaHandler extends EventEmitter {
       ws.on('close', () => {
         console.log('Telnyx Media WebSocket client disconnected');
         this.clientConnections.delete(ws);
+        
+        // Clean up any active streams for this connection
         this.cleanupStreamsForConnection(ws);
+        
+        // Log current active stream count
+        console.log(`📊 Active Telnyx streams remaining: ${this.activeStreams.size}`);
       });
 
       ws.on('error', (error) => {
@@ -109,8 +161,8 @@ export class TelnyxMediaHandler extends EventEmitter {
     });
   }
 
-  private async handleWebSocketMessage(ws: WebSocket, data: MediaMessage) {
-    switch (data.event) {
+  private async handleWebSocketMessage(ws: WebSocket, data: MediaMessage | any) {
+    switch (data.event || data.type) {
       case 'media':
         if (data.media?.payload) {
           // Validate base64 encoding
@@ -131,12 +183,40 @@ export class TelnyxMediaHandler extends EventEmitter {
             this.sendAudioToTelnyx(data.stream_id, data.media.payload);
           }
           
+          // Forward to HTTP audio bridge for non-WebRTC streaming
+          if (this.audioBridge && data.stream_id) {
+            // Extract call ID from stream ID or context
+            const callId = this.getCallIdFromStreamId(data.stream_id) || data.call_id || 'unknown';
+            this.audioBridge.handleIncomingAudio(callId, data.media.payload, {
+              timestamp: Date.now(),
+              codec: 'PCMU',
+              track: data.media.track || 'inbound'
+            });
+          }
+
           // Process incoming media from client (microphone audio)
           this.emit('incoming_media', {
             payload: data.media.payload,
             streamId: data.stream_id,
             connection: ws
           });
+        }
+        break;
+
+      case 'outbound_audio':
+        // Handle outbound audio from browser clients
+        if (data.payload) {
+          console.log('🎤 Received outbound audio from client, length:', data.payload.length);
+          
+          // Forward to Telnyx as bidirectional media
+          this.forwardOutboundAudio(data.payload);
+          
+          // Send confirmation back to client
+          ws.send(JSON.stringify({
+            type: 'outbound_audio_sent',
+            success: true,
+            timestamp: data.timestamp
+          }));
         }
         break;
 
@@ -321,6 +401,7 @@ export class TelnyxMediaHandler extends EventEmitter {
     this.activeStreams.forEach((client, streamId) => {
       if (client === ws) {
         streamsToDelete.push(streamId);
+        console.log(`🗑️ Cleaning up stream: ${streamId}`);
       }
     });
 
@@ -328,6 +409,8 @@ export class TelnyxMediaHandler extends EventEmitter {
       this.activeStreams.delete(streamId);
       this.streamConfigs.delete(streamId);
     });
+    
+    console.log(`📊 Cleaned up ${streamsToDelete.length} streams`);
   }
 
   private isValidBase64(str: string): boolean {
@@ -352,6 +435,45 @@ export class TelnyxMediaHandler extends EventEmitter {
 
   public getStreamConfig(streamId: string): TelnyxMediaConfig | undefined {
     return this.streamConfigs.get(streamId);
+  }
+
+  // Forward outbound audio from browser to Telnyx via bidirectional streaming
+  private forwardOutboundAudio(audioPayload: string) {
+    console.log('🎤 Forwarding outbound audio to Telnyx connections, length:', audioPayload.length);
+    
+    // Send outbound audio to Telnyx via streaming API
+    // Note: In Telnyx bidirectional streaming, we need to send media events back through the same WebSocket
+    const message = JSON.stringify({
+      event: 'media',
+      stream_id: this.getCurrentStreamId(),
+      media: {
+        payload: audioPayload
+      }
+    });
+    
+    let sentCount = 0;
+    // Send to all active stream connections (these represent Telnyx streaming connections)
+    this.activeStreams.forEach((ws, streamId) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(message);
+        sentCount++;
+        console.log(`📤 Sent outbound audio to Telnyx stream: ${streamId}`);
+      }
+    });
+    
+    console.log(`🎤 Successfully sent outbound audio to ${sentCount} active Telnyx streams`);
+  }
+
+  // Get current active stream ID for media forwarding
+  private getCurrentStreamId(): string {
+    const streamIds = Array.from(this.activeStreams.keys());
+    return streamIds.length > 0 ? streamIds[0] : 'default_stream';
+  }
+
+  // Check if a WebSocket connection is from Telnyx
+  private isTelnyxConnection(ws: WebSocket): boolean {
+    // Check if this WebSocket is in our active streams (Telnyx connections)
+    return Array.from(this.activeStreams.values()).includes(ws);
   }
 
   public destroy() {

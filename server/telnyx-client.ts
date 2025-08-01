@@ -213,6 +213,29 @@ export class TelnyxClient {
     return response.data.data;
   }
 
+  // Bidirectional Media Streaming with RTP support  
+  async startBidirectionalMediaStreaming(callControlId: string, track: string = 'both_tracks', codec: string = 'PCMU'): Promise<any> {
+    console.log(`🔄 Starting bidirectional streaming for call: ${callControlId}`);
+    
+    const streamingPayload = {
+      stream_url: `wss://${process.env.REPLIT_DOMAINS || process.env.REPLIT_DEV_DOMAIN || 'c11b1d67-ea3a-4935-b2b5-51939545ffa1-00-2j6h5mb9cxyxk.spock.replit.dev'}/ws/telnyx-media`,
+      stream_track: track,
+      enable_bidirectional_streams: true,
+      stream_bidirectional_mode: 'rtp',
+      stream_bidirectional_codec: codec,
+      stream_bidirectional_target_legs: 'both',
+      audio_codec: codec,
+      command_id: `bidirectional-${Date.now()}`
+    };
+    
+    console.log('📡 Telnyx streaming payload:', JSON.stringify(streamingPayload, null, 2));
+    
+    const response = await this.api.post(`/calls/${callControlId}/actions/streaming_start`, streamingPayload);
+    
+    console.log('✅ Bidirectional streaming started successfully');
+    return response.data.data;
+  }
+
   async stopMediaStreaming(callControlId: string): Promise<void> {
     await this.api.post(`/calls/${callControlId}/actions/streaming_stop`);
   }

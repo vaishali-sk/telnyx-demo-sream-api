@@ -5,6 +5,7 @@ import { storage } from "./storage";
 import { insertCallSchema, insertTelnyxConfigSchema } from "@shared/schema";
 import { telnyxClient } from "./telnyx-client.ts";
 import { TelnyxMediaHandler } from "./telnyx-media.ts";
+import { TelnyxAudioBridge } from "./telnyx-audio-bridge.ts";
 
 export function registerRoutes(app: Express): Server {
   const httpServer = createServer(app);
@@ -13,6 +14,14 @@ export function registerRoutes(app: Express): Server {
   console.log('Initializing Telnyx Media Handler...');
   const telnyxMediaHandler = new TelnyxMediaHandler(httpServer);
   console.log('Telnyx Media Handler initialized successfully');
+
+  // Initialize HTTP Audio Bridge (non-WebRTC solution)
+  console.log('Initializing HTTP Audio Bridge...');
+  const audioBridge = new TelnyxAudioBridge(httpServer);
+  console.log('HTTP Audio Bridge initialized successfully');
+
+  // Connect audio bridge to media handler for audio forwarding
+  telnyxMediaHandler.setAudioBridge(audioBridge);
 
   // Helper functions
   const getCallControlId = (metadata: any): string | undefined => metadata?.telnyxCallControlId;
@@ -340,32 +349,47 @@ export function registerRoutes(app: Express): Server {
       }
 
       try {
-        // Start media streaming via Telnyx API
-        const response = await telnyxClient.startMediaStreaming(callControlId, track, codec);
+        console.log(`🔄 Starting bidirectional streaming for call: ${callControlId}`);
+        
+        // Start bidirectional media streaming via Telnyx API
+        const response = await telnyxClient.startBidirectionalMediaStreaming(callControlId, track, codec);
+        console.log('✅ Bidirectional streaming started:', response);
+        
+        // Wait for Telnyx to connect to our WebSocket
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        // Check if Telnyx connected
+        const activeStreams = telnyxMediaHandler.getActiveStreamsCount();
+        console.log(`📊 Active Telnyx streams after starting: ${activeStreams}`);
         
         // Update call metadata
         await storage.updateCall(id, {
           metadata: updateMetadata(call.metadata, {
             mediaStreaming: true,
             streamingConfig: { track, codec },
-            streamingStarted: new Date().toISOString()
+            streamingStarted: new Date().toISOString(),
+            telnyxResponse: response
           })
         });
 
         res.json({
           success: true,
           message: 'Media streaming started',
-          streamingUrl: `wss://${process.env.REPLIT_DOMAINS || 'localhost:5000'}/ws/telnyx-media`,
-          streamId: response.stream_id || 'pending'
+          streamingUrl: `wss://${process.env.REPLIT_DOMAINS || process.env.REPLIT_DEV_DOMAIN || 'localhost:5000'}/ws/telnyx-media`,
+          streamId: response.stream_id || 'pending',
+          activeStreams: activeStreams,
+          telnyxResponse: response
         });
         
-        console.log(`🎵 Media streaming started for call ${callControlId}`);
+        console.log(`🎵 Media streaming started for call ${callControlId} - Active streams: ${activeStreams}`);
         
       } catch (telnyxError) {
         console.error('Telnyx media streaming error:', telnyxError);
+        console.error('Error details:', JSON.stringify(telnyxError, null, 2));
         res.status(500).json({ 
           success: false, 
-          message: 'Failed to start media streaming via Telnyx' 
+          message: 'Failed to start media streaming via Telnyx',
+          error: telnyxError 
         });
       }
       
@@ -400,6 +424,181 @@ export function registerRoutes(app: Express): Server {
     } catch (error) {
       console.error('Failed to join conference:', error);
       res.status(500).json({ message: "Failed to join conference" });
+    }
+  });
+
+  // ============ HTTP AUDIO STREAMING ENDPOINTS (Non-WebRTC) ============
+
+  // Start HTTP audio streaming for a call
+  app.post("/api/calls/:callId/start-http-audio", async (req, res) => {
+    try {
+      const { callId } = req.params;
+      const { codec = 'PCMU', bidirectional = true } = req.body;
+
+      console.log(`🎵 Starting HTTP audio stream for call: ${callId}`);
+
+      // Start Telnyx media streaming
+      await telnyxClient.startMediaStreaming(callId, 'both_tracks', codec);
+
+      // Start our audio bridge
+      const streamId = await audioBridge.startAudioStreaming(callId, {
+        codec,
+        bidirectional
+      });
+
+      res.json({
+        success: true,
+        streamId,
+        message: 'HTTP audio streaming started',
+        endpoints: {
+          inbound: `/api/calls/${callId}/audio/inbound`,
+          outbound: `/api/calls/${callId}/audio/outbound`,
+          status: `/api/calls/${callId}/audio/status`
+        }
+      });
+
+    } catch (error) {
+      console.error('Failed to start HTTP audio streaming:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to start HTTP audio streaming'
+      });
+    }
+  });
+
+  // Stop HTTP audio streaming for a call
+  app.post("/api/calls/:callId/stop-http-audio", async (req, res) => {
+    try {
+      const { callId } = req.params;
+
+      console.log(`🛑 Stopping HTTP audio stream for call: ${callId}`);
+
+      // Stop Telnyx media streaming
+      await telnyxClient.stopMediaStreaming(callId);
+
+      // Stop our audio bridge
+      await audioBridge.stopAudioStreaming(callId);
+
+      res.json({
+        success: true,
+        message: 'HTTP audio streaming stopped'
+      });
+
+    } catch (error) {
+      console.error('Failed to stop HTTP audio streaming:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to stop HTTP audio streaming'
+      });
+    }
+  });
+
+  // Get inbound audio stream (audio from the remote party)
+  app.get("/api/calls/:callId/audio/inbound", (req, res) => {
+    try {
+      const { callId } = req.params;
+      const { format = 'raw', since } = req.query;
+
+      if (!audioBridge.isStreamingActive(callId)) {
+        return res.status(404).json({
+          success: false,
+          message: 'No active audio stream for this call'
+        });
+      }
+
+      const audioBuffer = audioBridge.getAudioBuffer(callId, 'inbound');
+      
+      // Filter by timestamp if 'since' parameter provided
+      let filteredBuffer = audioBuffer;
+      if (since) {
+        const sinceTimestamp = parseInt(since as string);
+        filteredBuffer = audioBuffer.filter(packet => packet.timestamp > sinceTimestamp);
+      }
+
+      if (format === 'json') {
+        res.json({
+          success: true,
+          packets: filteredBuffer,
+          count: filteredBuffer.length
+        });
+      } else {
+        // Return raw audio data
+        const audioData = filteredBuffer.map(packet => packet.payload).join('');
+        res.setHeader('Content-Type', 'application/octet-stream');
+        res.setHeader('X-Audio-Codec', 'PCMU');
+        res.setHeader('X-Packet-Count', filteredBuffer.length.toString());
+        res.send(Buffer.from(audioData, 'base64'));
+      }
+
+    } catch (error) {
+      console.error('Failed to get inbound audio:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to get inbound audio'
+      });
+    }
+  });
+
+  // Send outbound audio (speak into the call)
+  app.post("/api/calls/:callId/audio/outbound", (req, res) => {
+    try {
+      const { callId } = req.params;
+      const { audioData, codec = 'PCMU', timestamp } = req.body;
+
+      if (!audioBridge.isStreamingActive(callId)) {
+        return res.status(404).json({
+          success: false,
+          message: 'No active audio stream for this call'
+        });
+      }
+
+      // Handle outbound audio
+      audioBridge.handleOutgoingAudio(callId, audioData, {
+        codec,
+        timestamp: timestamp || Date.now()
+      });
+
+      res.json({
+        success: true,
+        message: 'Audio sent successfully'
+      });
+
+    } catch (error) {
+      console.error('Failed to send outbound audio:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to send outbound audio'
+      });
+    }
+  });
+
+  // Get audio streaming status
+  app.get("/api/calls/:callId/audio/status", (req, res) => {
+    try {
+      const { callId } = req.params;
+      
+      const isActive = audioBridge.isStreamingActive(callId);
+      const config = audioBridge.getStreamConfig(callId);
+      const buffer = audioBridge.getAudioBuffer(callId);
+
+      res.json({
+        success: true,
+        isActive,
+        config,
+        stats: {
+          totalPackets: buffer.length,
+          inboundPackets: buffer.filter(p => p.direction === 'inbound').length,
+          outboundPackets: buffer.filter(p => p.direction === 'outbound').length,
+          lastActivity: buffer.length > 0 ? Math.max(...buffer.map(p => p.timestamp)) : null
+        }
+      });
+
+    } catch (error) {
+      console.error('Failed to get audio status:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to get audio status'
+      });
     }
   });
 

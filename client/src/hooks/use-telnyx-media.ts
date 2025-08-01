@@ -203,7 +203,9 @@ export function useTelnyxMedia(callId?: string) {
         wsRef.current.close();
       }
       if (audioContextRef.current) {
-        audioContextRef.current.close().catch(console.error);
+        audioContextRef.current.close().catch((error) => {
+          console.warn('Audio context close error (can be ignored):', error);
+        });
       }
       if (recordingIntervalRef.current) {
         clearInterval(recordingIntervalRef.current);
@@ -225,8 +227,12 @@ export function useTelnyxMedia(callId?: string) {
         
       // Resume context if suspended (required for user interaction)
       if (audioContextRef.current.state === 'suspended') {
-        await audioContextRef.current.resume();
-        console.log('🔓 Audio context resumed');
+        try {
+          await audioContextRef.current.resume();
+          console.log('🔓 Audio context resumed');
+        } catch (error) {
+          console.warn('Audio context resume failed:', error);
+        }
       }
 
       console.log('🎵 Playing incoming audio data, length:', audioData.length);
@@ -240,30 +246,36 @@ export function useTelnyxMedia(callId?: string) {
         return;
       }
       
-      // Simplified PCMU to linear PCM conversion for better compatibility
-      const floatArray = new Float32Array(audioBuffer.length);
+      // Proper μ-law to linear PCM conversion for voice audio
+      const pcmArray = new Int16Array(audioBuffer.length);
+      
       for (let i = 0; i < audioBuffer.length; i++) {
-        // Basic μ-law decode - simplified for better audio quality
         let sample = audioBuffer[i];
         
-        // Invert bits (μ-law format requirement)
-        sample = sample ^ 0xFF;
-        
-        // Extract sign, exponent, and mantissa
+        // Standard μ-law decode algorithm
+        sample = ~sample; // Bitwise NOT (complement)
         const sign = (sample & 0x80) !== 0;
-        const exponent = (sample >> 4) & 0x07;
-        const mantissa = sample & 0x0F;
+        let exponent = (sample >> 4) & 0x07;
+        let mantissa = sample & 0x0F;
         
-        // Calculate linear value
-        let linearValue = (mantissa * 2 + 33) << exponent;
+        // Rebuild linear value using μ-law formula
+        mantissa = (mantissa << 1) + 33;
+        let linearValue = mantissa << exponent;
         linearValue -= 33;
         
+        // Apply sign and scale properly
         if (sign) {
           linearValue = -linearValue;
         }
         
-        // Normalize to [-1, 1] range and amplify for better hearing
-        floatArray[i] = (linearValue / 8192.0) * 3.0; // Amplify by 3x
+        // Scale to 16-bit range for better voice quality
+        pcmArray[i] = Math.max(-32768, Math.min(32767, linearValue * 4));
+      }
+
+      // Convert to float array for Web Audio API
+      const floatArray = new Float32Array(pcmArray.length);
+      for (let i = 0; i < pcmArray.length; i++) {
+        floatArray[i] = pcmArray[i] / 32768.0; // Normalize to [-1, 1]
       }
 
       // Create audio buffer with proper timing
@@ -275,17 +287,25 @@ export function useTelnyxMedia(callId?: string) {
       const source = audioContextRef.current.createBufferSource();
       source.buffer = audioBufferNode;
       
-      // Create audio processing chain for maximum audibility
+      // Create audio processing chain for clear voice
       const gainNode = audioContextRef.current.createGain();
-      gainNode.gain.value = 5.0; // High volume for testing
+      const filterNode = audioContextRef.current.createBiquadFilter();
       
-      // Connect directly to output for now
-      source.connect(gainNode);
+      // Voice frequency filter (300Hz - 3400Hz bandpass)
+      filterNode.type = 'bandpass';
+      filterNode.frequency.value = 1200; // Better center frequency for voice clarity
+      filterNode.Q.value = 0.7; // Lower Q for wider frequency range
+      
+      gainNode.gain.value = 1.8; // Balanced amplification for clarity
+      
+      // Connect: source -> filter -> gain -> output
+      source.connect(filterNode);
+      filterNode.connect(gainNode);
       gainNode.connect(audioContextRef.current.destination);
       
       source.start();
       
-      console.log(`🔊 Audio played: ${duration.toFixed(3)}s, ${audioBuffer.length} samples, amplified 5x`);
+      console.log(`🔊 Voice audio played: ${duration.toFixed(3)}s, ${audioBuffer.length} μ-law samples`);
       
     } catch (error) {
       console.error('❌ Failed to play incoming audio:', error);
@@ -354,8 +374,12 @@ export function useTelnyxMedia(callId?: string) {
 
       // Resume audio context if suspended
       if (audioContextRef.current.state === 'suspended') {
-        await audioContextRef.current.resume();
-        console.log('🔓 Audio context resumed');
+        try {
+          await audioContextRef.current.resume();
+          console.log('🔓 Audio context resumed');
+        } catch (error) {
+          console.warn('Audio context resume failed:', error);
+        }
       }
 
       // Connect WebSocket if not connected
@@ -368,6 +392,7 @@ export function useTelnyxMedia(callId?: string) {
         ...prev, 
         isStreaming: true,
         config: {
+          streamUrl: `/ws/telnyx-media`,
           streamTrack: track,
           streamBidirectionalMode: 'rtp',
           streamBidirectionalCodec: 'PCMU'
