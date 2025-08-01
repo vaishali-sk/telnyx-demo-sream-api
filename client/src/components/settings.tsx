@@ -216,36 +216,7 @@ export function Settings() {
           </div>
         </div>
 
-        {/* Audio Settings */}
-        <div className="mt-8 pt-6 border-t border-gray-200">
-          <h3 className="text-lg font-medium text-gray-900 mb-4">Audio Settings</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="space-y-2">
-              <Label htmlFor="microphone">Microphone</Label>
-              <Select>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select microphone" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="default">Default - Built-in Microphone</SelectItem>
-                  <SelectItem value="usb">USB Headset</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="speaker">Speaker</Label>
-              <Select>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select speaker" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="default">Default - Built-in Speakers</SelectItem>
-                  <SelectItem value="usb">USB Headset</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-        </div>
+
 
         {/* Action Buttons */}
         <div className="mt-8 flex space-x-4">

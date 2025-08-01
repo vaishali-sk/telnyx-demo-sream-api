@@ -169,7 +169,8 @@ export function useDesktopAudio(config: AudioStreamConfig = {
           int16Array[i] = Math.max(-1, Math.min(1, audioData[i])) * 0x7FFF;
         }
         
-        const audioBase64 = btoa(String.fromCharCode(...new Uint8Array(int16Array.buffer)));
+        const uint8Array = new Uint8Array(int16Array.buffer);
+        const audioBase64 = btoa(String.fromCharCode.apply(null, Array.from(uint8Array)));
         
         // Send audio data via WebSocket
         if (wsRef.current?.readyState === WebSocket.OPEN) {

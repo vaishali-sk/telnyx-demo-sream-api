@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { useCallContext } from "@/contexts/call-context";
+import { useCallContext } from "@/contexts/api-call-context";
+import { useTelnyxMedia } from "@/hooks/use-telnyx-media";
 import { type Call } from "@shared/schema";
 import { 
   Phone, 
@@ -11,7 +12,9 @@ import {
   VolumeX, 
   MoreHorizontal,
   Plus,
-  User
+  User,
+  Radio,
+  RadioIcon
 } from "lucide-react";
 
 interface CallInterfaceProps {
@@ -19,7 +22,8 @@ interface CallInterfaceProps {
 }
 
 export function CallInterface({ currentCall }: CallInterfaceProps) {
-  const { endCall, activeCalls, muteCall, unmuteCall } = useCallContext();
+  const { endCall } = useCallContext();
+  const telnyxMedia = useTelnyxMedia(currentCall?.callId);
   const [isMuted, setIsMuted] = useState(false);
   const [isSpeaker, setIsSpeaker] = useState(false);
   const [callDuration, setCallDuration] = useState("00:00");
@@ -91,13 +95,7 @@ export function CallInterface({ currentCall }: CallInterfaceProps) {
             variant="outline"
             size="lg"
             onClick={() => {
-              if (isMuted) {
-                unmuteCall();
-                setIsMuted(false);
-              } else {
-                muteCall();
-                setIsMuted(true);
-              }
+              setIsMuted(!isMuted);
             }}
             className="p-4 flex flex-col items-center space-y-2 h-auto"
           >
@@ -115,24 +113,22 @@ export function CallInterface({ currentCall }: CallInterfaceProps) {
             variant="outline"
             size="lg"
             onClick={() => {
-              // Manually enable audio playback
-              const audioElement = document.getElementById('telnyx-remote-audio') as HTMLAudioElement;
-              if (audioElement) {
-                audioElement.play().then(() => {
-                  console.log('✅ Manual audio enable successful');
-                  setIsSpeaker(true);
-                }).catch(console.error);
+              if (telnyxMedia.isStreaming) {
+                telnyxMedia.stopMediaStream();
+              } else {
+                telnyxMedia.startMediaStream();
               }
-              setIsSpeaker(!isSpeaker);
             }}
             className="p-4 flex flex-col items-center space-y-2 h-auto"
           >
-            {isSpeaker ? (
-              <Volume2 className="w-6 h-6 text-blue-500" />
+            {telnyxMedia.isStreaming ? (
+              <Radio className="w-6 h-6 text-green-500" />
             ) : (
-              <VolumeX className="w-6 h-6 text-gray-600" />
+              <RadioIcon className="w-6 h-6 text-gray-600" />
             )}
-            <span className="text-xs text-gray-600">Speaker</span>
+            <span className="text-xs text-gray-600">
+              {telnyxMedia.isStreaming ? 'Audio On' : 'Audio Off'}
+            </span>
           </Button>
 
           <Button
@@ -153,6 +149,40 @@ export function CallInterface({ currentCall }: CallInterfaceProps) {
             <span className="text-xs text-gray-600">Add Call</span>
           </Button>
         </div>
+
+        {/* Telnyx Media Status */}
+        {telnyxMedia.error && (
+          <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+            <p className="text-sm text-red-600">Audio Error: {telnyxMedia.error}</p>
+          </div>
+        )}
+        
+        {telnyxMedia.isStreaming && (
+          <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <Radio className="w-4 h-4 text-green-600" />
+                <span className="text-sm text-green-700">Telnyx Media Streaming Active</span>
+              </div>
+              <div className="flex items-center space-x-1">
+                <span className="text-xs text-green-600">Audio Level:</span>
+                <div className="w-16 h-2 bg-green-200 rounded-full overflow-hidden">
+                  <div 
+                    className="h-full bg-green-500 transition-all duration-100"
+                    style={{ width: `${telnyxMedia.audioLevel}%` }}
+                  />
+                </div>
+                <span className="text-xs text-green-600">{telnyxMedia.audioLevel}%</span>
+              </div>
+            </div>
+            {telnyxMedia.mediaFormat && (
+              <div className="mt-2 text-xs text-green-600">
+                Codec: {telnyxMedia.mediaFormat.encoding} • Sample Rate: {telnyxMedia.mediaFormat.sample_rate}Hz • Channels: {telnyxMedia.mediaFormat.channels}
+                {telnyxMedia.streamId && ` • Stream: ${telnyxMedia.streamId.substring(0, 8)}...`}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Primary Action Button */}
         <div className="flex justify-center">

@@ -1,16 +1,15 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
-import { WebSocketServer, WebSocket } from "ws";
 import { storage } from "./storage";
 import { insertCallSchema, insertTelnyxConfigSchema } from "@shared/schema";
 import { telnyxClient } from "./telnyx-client.js";
-import { AudioStreamingManager } from "./websocket-audio";
+import { TelnyxMediaHandler } from "./telnyx-media.js";
 
 export function registerRoutes(app: Express): Server {
   const httpServer = createServer(app);
   
-  // Initialize WebSocket audio streaming for desktop functionality
-  const audioStreaming = new AudioStreamingManager(httpServer);
+  // Initialize Telnyx Media Handler for official WebSocket streaming
+  const telnyxMediaHandler = new TelnyxMediaHandler(httpServer);
 
   // Helper functions
   const getCallControlId = (metadata: any): string | undefined => metadata?.telnyxCallControlId;
@@ -31,12 +30,15 @@ export function registerRoutes(app: Express): Server {
       
       let telnyxCall;
       
+      // Get streaming configuration for Telnyx media
+      const streamingConfig = telnyxMediaHandler.getTelnyxStreamingConfig('both_tracks');
+      
       // If user provides their phone number, use bridge mode for audio
       if (userPhoneNumber) {
         console.log(`🌉 Bridge mode: ${userPhoneNumber} -> ${toNumber}`);
         telnyxCall = await telnyxClient.createBridgedCall(toNumber, userPhoneNumber);
       } else {
-        // Standard call (no audio in browser)
+        // Standard call with media streaming support
         telnyxCall = await telnyxClient.createCall(toNumber, fromNumber);
       }
       
@@ -55,7 +57,10 @@ export function registerRoutes(app: Express): Server {
           telnyxCallSessionId: telnyxCall.call_session_id,
           direction: telnyxCall.direction,
           bridgeMode: !!userPhoneNumber,
-          userPhoneNumber: userPhoneNumber || null
+          userPhoneNumber: userPhoneNumber || null,
+          mediaStreaming: false,
+          streamId: null,
+          streamingConfig: null
         }
       });
 
@@ -336,75 +341,121 @@ export function registerRoutes(app: Express): Server {
     }
   });
 
-  // WebSocket Audio Streaming Endpoint (for future Electron integration)
-  app.post('/api/audio/stream', async (req, res) => {
+  // Telnyx Media Streaming endpoints (official WebSocket streaming)
+  app.post("/api/calls/:id/start-media-stream", async (req, res) => {
     try {
-      const { callId, audioData } = req.body;
-      // TODO: Implement WebSocket audio streaming for desktop app
-      // This will handle bidirectional audio streaming for Electron
-      res.json({ success: true, message: "Audio streaming not yet implemented" });
+      const { id } = req.params;
+      const { track = 'both_tracks', codec = 'PCMU' } = req.body;
+      
+      const call = await storage.getCall(id);
+      if (!call) {
+        return res.status(404).json({ message: "Call not found" });
+      }
+
+      const callControlId = getCallControlId(call.metadata);
+      if (!callControlId) {
+        return res.status(400).json({ message: "Invalid call" });
+      }
+
+      // Get Telnyx streaming configuration
+      const streamingConfig = telnyxMediaHandler.getTelnyxStreamingConfig(track);
+      
+      // Start media stream
+      const streamId = telnyxMediaHandler.startMediaStream(callControlId, streamingConfig, {
+        encoding: codec,
+        sample_rate: 8000,
+        channels: 1
+      });
+
+      // Update call metadata with streaming info
+      await storage.updateCall(id, { 
+        metadata: updateMetadata(call.metadata, { 
+          mediaStreaming: true,
+          streamId,
+          streamingConfig 
+        })
+      });
+
+      res.json({ 
+        success: true, 
+        message: "Media streaming started",
+        streamId,
+        streamingUrl: streamingConfig.streamUrl,
+        callId: call.callId
+      });
     } catch (error) {
-      console.error('Failed to stream audio:', error);
-      res.status(500).json({ message: "Failed to stream audio" });
+      console.error('Failed to start media stream:', error);
+      res.status(500).json({ message: "Failed to start media stream" });
     }
   });
 
-  // WebSocket server for real-time call updates
-  const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
-
-  wss.on('connection', (ws) => {
-    console.log('Client connected to WebSocket');
-
-    ws.on('message', async (message) => {
-      try {
-        const data = JSON.parse(message.toString());
-        
-        switch (data.type) {
-          case 'call_status_update':
-            const callUpdate = {
-              type: 'call_status_update',
-              data: data.payload
-            };
-            
-            wss.clients.forEach((client) => {
-              if (client.readyState === WebSocket.OPEN) {
-                client.send(JSON.stringify(callUpdate));
-              }
-            });
-            break;
-        }
-      } catch (error) {
-        console.error('WebSocket message error:', error);
+  app.post("/api/calls/:id/stop-media-stream", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const call = await storage.getCall(id);
+      if (!call) {
+        return res.status(404).json({ message: "Call not found" });
       }
-    });
 
-    ws.on('close', () => {
-      console.log('Client disconnected from WebSocket');
-    });
+      const callControlId = getCallControlId(call.metadata);
+      const streamId = (call.metadata as any)?.streamId;
+
+      if (callControlId && streamId) {
+        telnyxMediaHandler.stopMediaStream(streamId, callControlId);
+      }
+
+      // Update call metadata to remove streaming info
+      await storage.updateCall(id, { 
+        metadata: updateMetadata(call.metadata, { 
+          mediaStreaming: false,
+          streamId: null,
+          streamingConfig: null 
+        })
+      });
+
+      res.json({ success: true, message: "Media streaming stopped" });
+    } catch (error) {
+      console.error('Failed to stop media stream:', error);
+      res.status(500).json({ message: "Failed to stop media stream" });
+    }
   });
 
-  // Audio streaming WebSocket endpoint for Telnyx
-  const audioWss = new WebSocketServer({ server: httpServer, path: '/audio-stream' });
-  
-  audioWss.on('connection', (ws) => {
-    console.log('Telnyx audio stream connected');
-    
-    ws.on('message', (data) => {
-      // Handle incoming audio from Telnyx
-      // Forward to connected clients
-      wss.clients.forEach(client => {
-        if (client.readyState === WebSocket.OPEN) {
-          client.send(JSON.stringify({
-            type: 'audio_data',
-            data: data.toString('base64')
-          }));
-        }
+  app.get("/api/calls/:id/media-config", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const call = await storage.getCall(id);
+      if (!call) {
+        return res.status(404).json({ message: "Call not found" });
+      }
+
+      const streamingConfig = (call.metadata as any)?.streamingConfig;
+      const isStreaming = (call.metadata as any)?.mediaStreaming || false;
+      const streamId = (call.metadata as any)?.streamId;
+
+      res.json({ 
+        success: true,
+        isStreaming,
+        streamId,
+        config: streamingConfig || null,
+        callId: call.callId
       });
-    });
-    
-    ws.on('close', () => {
-      console.log('Telnyx audio stream disconnected');
-    });
+    } catch (error) {
+      console.error('Failed to get media config:', error);
+      res.status(500).json({ message: "Failed to get media config" });
+    }
+  });
+
+  // Media streaming statistics endpoint
+  app.get("/api/media-stats", async (req, res) => {
+    try {
+      res.json({
+        activeStreams: telnyxMediaHandler.getActiveStreamsCount(),
+        streamingUrl: telnyxMediaHandler.getStreamingUrl(),
+        serverStatus: 'running'
+      });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to get media statistics" });
+    }
   });
 
   return httpServer;

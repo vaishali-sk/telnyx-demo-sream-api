@@ -74,11 +74,7 @@ export function SimpleDialer() {
           </div>
         </div>
 
-        {/* Audio Mode Info */}
-        <div className="text-xs text-blue-600 bg-blue-50 p-2 rounded">
-          <strong>Audio Options:</strong> For immediate audio, the system can bridge calls through your phone. 
-          Enter your phone number as "From Number" and the system will call you first, then connect to destination.
-        </div>
+
 
         {/* Keypad */}
         <div className="grid grid-cols-3 gap-2">

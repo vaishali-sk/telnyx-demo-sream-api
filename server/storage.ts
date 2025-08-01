@@ -1,6 +1,6 @@
 import { type User, type InsertUser, type Call, type InsertCall, type TelnyxConfig, type InsertTelnyxConfig } from "@shared/schema";
 import { randomUUID } from "crypto";
-import { TELNYX_CONFIG } from "../telnyx-config.ts";
+import { TELNYX_CONFIG } from "../telnyx-config.js";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
