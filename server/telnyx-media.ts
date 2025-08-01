@@ -53,6 +53,7 @@ export class TelnyxMediaHandler extends EventEmitter {
   private activeStreams: Map<string, WebSocket> = new Map();
   private streamConfigs: Map<string, TelnyxMediaConfig> = new Map();
   private telnyxConnections: Map<string, WebSocket> = new Map();
+  private clientConnections: Set<WebSocket> = new Set();
 
   constructor(private httpServer: Server) {
     super();
@@ -69,10 +70,10 @@ export class TelnyxMediaHandler extends EventEmitter {
     
     this.wsServer.on('connection', (ws, req) => {
       console.log('🔌 Telnyx Media WebSocket client connected from:', req.socket.remoteAddress);
-      console.log('Request URL:', req.url);
-      console.log('User-Agent:', req.headers['user-agent']);
-      console.log('Connection ID assigned:', Math.random().toString(36).substring(7));
-
+      
+      // Track this client connection
+      this.clientConnections.add(ws);
+      
       // Send connected event immediately
       ws.send(JSON.stringify({
         event: 'connected',
@@ -98,7 +99,7 @@ export class TelnyxMediaHandler extends EventEmitter {
 
       ws.on('close', () => {
         console.log('Telnyx Media WebSocket client disconnected');
-        // Clean up any streams associated with this connection
+        this.clientConnections.delete(ws);
         this.cleanupStreamsForConnection(ws);
       });
 
@@ -289,11 +290,29 @@ export class TelnyxMediaHandler extends EventEmitter {
     }
   }
 
-  // Send audio data to Telnyx (handled by Telnyx infrastructure)
+  // Forward incoming audio data from Telnyx to all connected clients
   public sendAudioToTelnyx(streamId: string, audioData: string) {
-    // In production, audio is handled by Telnyx infrastructure when stream_url is configured
-    // This method processes and potentially transforms audio if needed
-    console.log(`Processing audio for stream ${streamId}, length: ${audioData.length}`);
+    console.log(`🎵 Processing audio for stream ${streamId}, length: ${audioData.length}`);
+    
+    // Forward this audio data to ALL connected clients
+    const message = JSON.stringify({
+      event: 'media',
+      media: {
+        payload: audioData,
+        stream_id: streamId,
+        timestamp: Date.now()
+      }
+    });
+    
+    let sentCount = 0;
+    this.clientConnections.forEach((client) => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(message);
+        sentCount++;
+      }
+    });
+    
+    console.log(`🔊 Audio forwarded to ${sentCount} connected clients`);
   }
 
   private cleanupStreamsForConnection(ws: WebSocket) {

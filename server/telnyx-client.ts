@@ -31,8 +31,10 @@ export class TelnyxClient {
       }
     });
 
-    // In production, this would be your actual webhook URL
-    this.webhookUrl = 'https://54cdb265ccf9.ngrok-free.app/webhooks/calls';
+    // Use Replit webhook URL - get from environment or construct from domain
+    const replitDomain = process.env.REPLIT_DOMAINS || process.env.REPLIT_DEV_DOMAIN || 'e1a07bf2-3924-4b64-b401-cd9ba7b016b5-00-1vafg3jar3g89.spock.replit.dev';
+    this.webhookUrl = `https://${replitDomain}/webhooks/calls`;
+    console.log('🔗 Webhook URL configured:', this.webhookUrl);
   }
 
   // Call Management with Media Streaming support
@@ -45,19 +47,20 @@ export class TelnyxClient {
         webhook_url: this.webhookUrl,
         webhook_url_method: 'POST',
         // Enable media streaming for this call
-        stream_url: `wss://${process.env.REPLIT_DOMAIN || 'localhost:5000'}/ws/telnyx-media`,
+        stream_url: `wss://${process.env.REPLIT_DOMAINS || process.env.REPLIT_DEV_DOMAIN || 'e1a07bf2-3924-4b64-b401-cd9ba7b016b5-00-1vafg3jar3g89.spock.replit.dev'}/ws/telnyx-media`,
         stream_track: 'both_tracks',
         send_silence_when_idle: true,
         audio_codec: 'PCMU'
       });
       return response.data.data;
     } catch (error: any) {
-      if (error.response && error.response.data && error.response.data.errors) {
+      if (error.response?.data?.errors) {
         error.response.data.errors.forEach((err: any) => {
-          console.error(`❌ Error in field ${err.source.pointer}: ${err.detail}`);
+          const field = err.source?.pointer || 'unknown field';
+          console.error(`❌ Error in field ${field}: ${err.detail}`);
         });
       } else {
-        console.error('❌ Unknown error:', error.message);
+        console.error('❌ Unknown error:', error.message || error);
       }
       throw error; // Re-throw to handle in calling code
     }
@@ -197,6 +200,21 @@ export class TelnyxClient {
     await this.api.post(`/calls/${callControlId}/actions/send_dtmf`, {
       digits
     });
+  }
+
+  // Media Streaming Operations
+  async startMediaStreaming(callControlId: string, track: string = 'both_tracks', codec: string = 'PCMU'): Promise<any> {
+    const response = await this.api.post(`/calls/${callControlId}/actions/streaming_start`, {
+      stream_track: track,
+      stream_url: `wss://${process.env.REPLIT_DOMAINS || process.env.REPLIT_DEV_DOMAIN || 'e1a07bf2-3924-4b64-b401-cd9ba7b016b5-00-1vafg3jar3g89.spock.replit.dev'}/ws/telnyx-media`,
+      enable_bidirectional_streams: true,
+      audio_codec: codec
+    });
+    return response.data.data;
+  }
+
+  async stopMediaStreaming(callControlId: string): Promise<void> {
+    await this.api.post(`/calls/${callControlId}/actions/streaming_stop`);
   }
 
   // Call Information

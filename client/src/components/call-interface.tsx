@@ -113,10 +113,11 @@ export function CallInterface({ currentCall }: CallInterfaceProps) {
             variant="outline"
             size="lg"
             onClick={() => {
+              console.log('Audio button clicked, isStreaming:', telnyxMedia.isStreaming);
               if (telnyxMedia.isStreaming) {
                 telnyxMedia.stopMediaStream();
               } else {
-                telnyxMedia.startMediaStream();
+                telnyxMedia.startMediaStream('both_tracks');
               }
             }}
             className="p-4 flex flex-col items-center space-y-2 h-auto"
@@ -127,7 +128,7 @@ export function CallInterface({ currentCall }: CallInterfaceProps) {
               <RadioIcon className="w-6 h-6 text-gray-600" />
             )}
             <span className="text-xs text-gray-600">
-              {telnyxMedia.isStreaming ? 'Audio On' : 'Audio Off'}
+              {telnyxMedia.isStreaming ? 'Audio On' : 'Start Audio'}
             </span>
           </Button>
 
@@ -151,6 +152,53 @@ export function CallInterface({ currentCall }: CallInterfaceProps) {
         </div>
 
         {/* Telnyx Media Status */}
+        <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm font-medium text-blue-700">Audio Streaming</span>
+            <div className="flex items-center space-x-2">
+              <div className={`w-2 h-2 rounded-full ${telnyxMedia.isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
+              <span className="text-xs text-blue-600">
+                {telnyxMedia.isConnected ? 'Connected' : 'Disconnected'}
+              </span>
+            </div>
+          </div>
+          
+          <div className="flex space-x-2">
+            <Button
+              size="sm"
+              variant={telnyxMedia.isStreaming ? "default" : "outline"}
+              onClick={() => {
+                console.log('Manual audio toggle');
+                if (telnyxMedia.isStreaming) {
+                  telnyxMedia.stopMediaStream();
+                } else {
+                  telnyxMedia.startMediaStream('both_tracks');
+                }
+              }}
+              className="flex items-center space-x-1"
+            >
+              <Radio className="w-3 h-3" />
+              <span>{telnyxMedia.isStreaming ? 'Stop Audio' : 'Start Audio'}</span>
+            </Button>
+            
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => telnyxMedia.connectWebSocket()}
+              disabled={telnyxMedia.isConnected}
+              className="flex items-center space-x-1"
+            >
+              <RadioIcon className="w-3 h-3" />
+              <span>Connect</span>
+            </Button>
+          </div>
+          
+          <div className="mt-2 text-xs text-blue-600">
+            Status: {telnyxMedia.isStreaming ? 'Streaming Active' : 'Streaming Inactive'} •
+            WebSocket: {telnyxMedia.isConnected ? 'Connected' : 'Disconnected'}
+          </div>
+        </div>
+
         {telnyxMedia.error && (
           <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
             <p className="text-sm text-red-600">Audio Error: {telnyxMedia.error}</p>

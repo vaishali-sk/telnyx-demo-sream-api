@@ -5,7 +5,7 @@ import { CallInterface } from "@/components/call-interface";
 import { ActiveCalls } from "@/components/active-calls";
 import { Settings } from "@/components/settings";
 import { TransferModal } from "@/components/transfer-modal";
-import { useCallContext } from "@/contexts/call-context";
+import { useCallContext } from "@/contexts/api-call-context";
 import { Button } from "@/components/ui/button";
 import { Settings as SettingsIcon, Phone } from "lucide-react";
 
@@ -14,7 +14,7 @@ export default function Softphone() {
   const [showTransferModal, setShowTransferModal] = useState(false);
   const { activeCalls } = useCallContext();
 
-  const currentCall = activeCalls.find(call => call.status === 'active');
+  const currentCall = activeCalls.find((call: any) => call.status === 'active');
 
   return (
     <div className="bg-gray-50 h-screen flex flex-col">

@@ -79,8 +79,6 @@ export function useTelnyxMedia(callId?: string) {
   const analyserRef = useRef<AnalyserNode | null>(null);
   const recordingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Auto-connect to WebSocket when hook initializes (moved after connectWebSocket definition)
-
   // Connect to Telnyx Media WebSocket server
   const connectWebSocket = useCallback(() => {
     console.log('🚀 connectWebSocket() called for callId:', callId);
@@ -88,48 +86,34 @@ export function useTelnyxMedia(callId?: string) {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
 
     try {
-      // Construct WebSocket URL without tokens - use simple relative path approach
+      // Construct WebSocket URL for Replit environment
       const isHttps = window.location.protocol === "https:";
       const protocol = isHttps ? "wss:" : "ws:";
       
-      // For Replit environment, use window.location.host directly but clean it
+      // Use current host for WebSocket connection
       let host = window.location.host;
       
-      // Debug the original host value
-      console.log('Raw window.location.host:', host);
-      console.log('Raw window.location.hostname:', window.location.hostname);
-      console.log('Raw window.location.port:', window.location.port);
-      
-      // Clean malformed host with tokens or authentication
-      if (host.includes('token=') || host.includes('/?')) {
-        // Extract clean domain:port part
-        host = host.split('/?')[0].split('?')[0];
+      // Clean any URL params or fragments from host
+      if (host.includes('?') || host.includes('#')) {
+        host = host.split('?')[0].split('#')[0];
       }
       
-      // If in Replit environment, construct proper URL
-      if (host.includes('.replit.dev')) {
-        // Use current domain with proper protocol
-        const wsUrl = `${protocol}//${host}/ws/telnyx-media`;
-        console.log('🔗 Using Replit domain for WebSocket:', wsUrl);
-        wsRef.current = new WebSocket(wsUrl);
-      } else {
-        // Local development
-        const wsUrl = `${protocol}//localhost:5000/ws/telnyx-media`;
-        console.log('🔗 Using localhost for WebSocket:', wsUrl);
-        wsRef.current = new WebSocket(wsUrl);
-      }
+      const wsUrl = `${protocol}//${host}/ws/telnyx-media`;
+      console.log('🔗 Connecting to WebSocket:', wsUrl);
       
-      console.log('Original location:', window.location.href);
-      console.log('Cleaned host:', host);
-      console.log('WebSocket readyState before creation:', wsRef.current?.readyState);
+      wsRef.current = new WebSocket(wsUrl);
       
       wsRef.current.onopen = () => {
         console.log('✅ Telnyx Media WebSocket connected successfully');
         setState(prev => ({ ...prev, isConnected: true, error: null }));
+        // Send connected acknowledgment
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify({ event: 'connected', version: '1.0' }));
+        }
       };
       
-      wsRef.current.onclose = () => {
-        console.log('Telnyx Media WebSocket disconnected');
+      wsRef.current.onclose = (event) => {
+        console.log('Telnyx Media WebSocket disconnected:', event.code, event.reason);
         setState(prev => ({ ...prev, isConnected: false, isStreaming: false }));
       };
       
@@ -151,7 +135,7 @@ export function useTelnyxMedia(callId?: string) {
       setState(prev => ({ ...prev, error: 'Failed to connect WebSocket' }));
       console.error('WebSocket connection error:', err);
     }
-  }, []);
+  }, [callId]);
 
   const handleIncomingMessage = useCallback((message: MediaMessage) => {
     switch (message.event) {
@@ -184,6 +168,7 @@ export function useTelnyxMedia(callId?: string) {
       case 'media':
         // Handle incoming audio from remote party
         if (message.media?.payload) {
+          console.log('🔊 Received audio data, length:', message.media.payload.length);
           playIncomingAudio(message.media.payload);
         }
         break;
@@ -208,36 +193,146 @@ export function useTelnyxMedia(callId?: string) {
     }
   }, []);
 
-  const playIncomingAudio = useCallback(async (audioData: string) => {
-    if (!audioContextRef.current) return;
+  // Auto-connect to WebSocket when hook initializes
+  useEffect(() => {
+    connectWebSocket();
+    
+    // Cleanup on unmount
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
+      if (audioContextRef.current) {
+        audioContextRef.current.close().catch(console.error);
+      }
+      if (recordingIntervalRef.current) {
+        clearInterval(recordingIntervalRef.current);
+      }
+    };
+  }, [connectWebSocket]);
 
+  const playIncomingAudio = useCallback(async (audioData: string) => {
     try {
-      // Decode base64 RTP payload
-      const audioBuffer = Uint8Array.from(atob(audioData), c => c.charCodeAt(0));
-      
-      // For PCMU/PCMA, we need to decode the audio format properly
-      // This is a simplified approach - in production you'd want proper codec handling
-      const floatArray = new Float32Array(audioBuffer.length);
-      for (let i = 0; i < audioBuffer.length; i++) {
-        // Simple PCMU to linear PCM conversion (very basic)
-        floatArray[i] = (audioBuffer[i] - 128) / 128.0;
+      // Initialize audio context if needed
+      if (!audioContextRef.current) {
+        // Use higher sample rate for better audio quality
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({
+          sampleRate: 48000,
+          latencyHint: 'interactive'
+        });
+        console.log('🎧 Audio context created with sample rate:', audioContextRef.current.sampleRate);
+      }
+        
+      // Resume context if suspended (required for user interaction)
+      if (audioContextRef.current.state === 'suspended') {
+        await audioContextRef.current.resume();
+        console.log('🔓 Audio context resumed');
       }
 
-      // Create audio buffer
-      const audioBufferNode = audioContextRef.current.createBuffer(1, floatArray.length, 8000);
+      console.log('🎵 Playing incoming audio data, length:', audioData.length);
+      
+      // Decode base64 RTP payload
+      const audioBuffer = Uint8Array.from(atob(audioData), c => c.charCodeAt(0));
+      console.log('📊 Decoded audio buffer length:', audioBuffer.length);
+      
+      if (audioBuffer.length === 0) {
+        console.warn('⚠️ Empty audio buffer received');
+        return;
+      }
+      
+      // Simplified PCMU to linear PCM conversion for better compatibility
+      const floatArray = new Float32Array(audioBuffer.length);
+      for (let i = 0; i < audioBuffer.length; i++) {
+        // Basic μ-law decode - simplified for better audio quality
+        let sample = audioBuffer[i];
+        
+        // Invert bits (μ-law format requirement)
+        sample = sample ^ 0xFF;
+        
+        // Extract sign, exponent, and mantissa
+        const sign = (sample & 0x80) !== 0;
+        const exponent = (sample >> 4) & 0x07;
+        const mantissa = sample & 0x0F;
+        
+        // Calculate linear value
+        let linearValue = (mantissa * 2 + 33) << exponent;
+        linearValue -= 33;
+        
+        if (sign) {
+          linearValue = -linearValue;
+        }
+        
+        // Normalize to [-1, 1] range and amplify for better hearing
+        floatArray[i] = (linearValue / 8192.0) * 3.0; // Amplify by 3x
+      }
+
+      // Create audio buffer with proper timing
+      const sampleRate = 8000; // PCMU is always 8kHz
+      const duration = floatArray.length / sampleRate;
+      const audioBufferNode = audioContextRef.current.createBuffer(1, floatArray.length, sampleRate);
       audioBufferNode.copyToChannel(floatArray, 0);
       
       const source = audioContextRef.current.createBufferSource();
       source.buffer = audioBufferNode;
-      source.connect(audioContextRef.current.destination);
+      
+      // Create audio processing chain for maximum audibility
+      const gainNode = audioContextRef.current.createGain();
+      gainNode.gain.value = 5.0; // High volume for testing
+      
+      // Connect directly to output for now
+      source.connect(gainNode);
+      gainNode.connect(audioContextRef.current.destination);
+      
       source.start();
       
+      console.log(`🔊 Audio played: ${duration.toFixed(3)}s, ${audioBuffer.length} samples, amplified 5x`);
+      
     } catch (error) {
-      console.error('Failed to play incoming audio:', error);
+      console.error('❌ Failed to play incoming audio:', error);
+      setState(prev => ({ ...prev, error: `Audio playback failed: ${error}` }));
     }
   }, []);
 
-  // Start media streaming
+  // Start streaming function for the button
+  const startStream = useCallback(async (targetCallId?: string) => {
+    const activeCallId = targetCallId || callId;
+    if (!activeCallId) {
+      setState(prev => ({ ...prev, error: 'No call ID provided' }));
+      return;
+    }
+    
+    console.log('Starting stream for call:', activeCallId);
+    
+    // Initialize audio context if needed
+    if (!audioContextRef.current) {
+      try {
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+        console.log('Audio context initialized');
+      } catch (error) {
+        console.error('Failed to initialize audio context:', error);
+        setState(prev => ({ ...prev, error: 'Failed to initialize audio' }));
+        return;
+      }
+    }
+
+    // Connect WebSocket if not connected
+    if (!state.isConnected) {
+      connectWebSocket();
+    }
+    
+    setState(prev => ({ ...prev, isStreaming: true, error: null }));
+  }, [callId, state.isConnected, connectWebSocket]);
+
+  // Stop streaming function
+  const stopStream = useCallback(() => {
+    console.log('Stopping stream');
+    setState(prev => ({ ...prev, isStreaming: false }));
+    if (audioContextRef.current) {
+      audioContextRef.current.suspend();
+    }
+  }, []);
+
+  // Simplified media streaming - just manage WebSocket connection and audio
   const startMediaStream = useCallback(async (track: 'inbound_track' | 'outbound_track' | 'both_tracks' = 'both_tracks') => {
     if (!callId) {
       setState(prev => ({ ...prev, error: 'No call ID provided' }));
@@ -245,78 +340,44 @@ export function useTelnyxMedia(callId?: string) {
     }
 
     try {
+      console.log('🎵 Starting media stream for call:', callId);
       setState(prev => ({ ...prev, error: null }));
+
+      // Initialize audio context for playback (user interaction required)
+      if (!audioContextRef.current) {
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({
+          sampleRate: 48000,
+          latencyHint: 'interactive'
+        });
+        console.log('🎧 Audio context initialized for playback');
+      }
+
+      // Resume audio context if suspended
+      if (audioContextRef.current.state === 'suspended') {
+        await audioContextRef.current.resume();
+        console.log('🔓 Audio context resumed');
+      }
 
       // Connect WebSocket if not connected
       if (!state.isConnected) {
         connectWebSocket();
-        // Wait for connection
-        await new Promise((resolve, reject) => {
-          const checkConnection = () => {
-            if (wsRef.current?.readyState === WebSocket.OPEN) {
-              resolve(true);
-            } else if (wsRef.current?.readyState === WebSocket.CLOSED) {
-              reject(new Error('WebSocket connection failed'));
-            } else {
-              setTimeout(checkConnection, 100);
-            }
-          };
-          checkConnection();
-        });
       }
 
-      // Start media stream via API
-      const response = await apiRequest('POST', `/api/calls/${callId}/start-media-stream`, {
-        track,
-        codec: 'PCMU'
-      });
+      // Set streaming state to true - Telnyx handles the actual streaming
+      setState(prev => ({ 
+        ...prev, 
+        isStreaming: true,
+        config: {
+          streamTrack: track,
+          streamBidirectionalMode: 'rtp',
+          streamBidirectionalCodec: 'PCMU'
+        }
+      }));
 
-      const result = await response.json();
-      
-      if (result.success) {
-        // Initialize audio context for microphone capture
-        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({
-          sampleRate: 8000
-        });
-
-        // Get microphone access
-        mediaStreamRef.current = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            sampleRate: 8000,
-            channelCount: 1,
-            echoCancellation: true,
-            noiseSuppression: true
-          }
-        });
-
-        // Set up audio processing
-        const source = audioContextRef.current.createMediaStreamSource(mediaStreamRef.current);
-        
-        // Audio level monitoring
-        analyserRef.current = audioContextRef.current.createAnalyser();
-        analyserRef.current.fftSize = 256;
-        source.connect(analyserRef.current);
-
-        // Start monitoring audio levels and sending audio data
-        startAudioProcessing(result.streamId);
-
-        setState(prev => ({ 
-          ...prev, 
-          config: {
-            streamUrl: result.streamingUrl,
-            streamTrack: track,
-            streamBidirectionalMode: 'rtp',
-            streamBidirectionalCodec: 'PCMU'
-          }
-        }));
-
-        console.log('Telnyx media streaming started successfully');
-      } else {
-        throw new Error(result.message || 'Failed to start media stream');
-      }
+      console.log('✅ Media streaming enabled - Telnyx will handle the stream automatically');
       
     } catch (err) {
-      const errorMsg = `Failed to start media stream: ${err}`;
+      const errorMsg = `Failed to initialize media streaming: ${err}`;
       setState(prev => ({ ...prev, error: errorMsg }));
       console.error(errorMsg);
     }
@@ -324,9 +385,9 @@ export function useTelnyxMedia(callId?: string) {
 
   // Stop media streaming
   const stopMediaStream = useCallback(async () => {
-    if (!callId) return;
-
     try {
+      console.log('🛑 Stopping media streaming');
+
       // Stop audio processing
       if (recordingIntervalRef.current) {
         clearInterval(recordingIntervalRef.current);
@@ -338,13 +399,10 @@ export function useTelnyxMedia(callId?: string) {
         mediaStreamRef.current = null;
       }
 
-      if (audioContextRef.current) {
-        audioContextRef.current.close();
-        audioContextRef.current = null;
+      // Don't close audio context, just suspend it for reuse
+      if (audioContextRef.current && audioContextRef.current.state !== 'suspended') {
+        await audioContextRef.current.suspend();
       }
-
-      // Stop media stream via API
-      await apiRequest('POST', `/api/calls/${callId}/stop-media-stream`);
 
       setState(prev => ({ 
         ...prev, 
@@ -355,13 +413,12 @@ export function useTelnyxMedia(callId?: string) {
         mediaFormat: null
       }));
 
-      console.log('Telnyx media streaming stopped');
+      console.log('✅ Media streaming stopped');
       
     } catch (err) {
-      setState(prev => ({ ...prev, error: `Failed to stop media stream: ${err}` }));
       console.error('Failed to stop media stream:', err);
     }
-  }, [callId]);
+  }, []);
 
   // Start audio processing (recording and level monitoring)
   const startAudioProcessing = useCallback((streamId: string) => {
@@ -471,6 +528,9 @@ export function useTelnyxMedia(callId?: string) {
 
   return {
     ...state,
+    connectWebSocket,
+    startStream,
+    stopStream,
     startMediaStream,
     stopMediaStream,
     sendMediaMessage,

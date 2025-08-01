@@ -171,6 +171,75 @@ export function registerRoutes(app: Express): Server {
     }
   });
 
+  // Telnyx webhook endpoint for call status updates
+  app.post("/webhooks/calls", async (req, res) => {
+    try {
+      console.log('🔔 Telnyx webhook received:', JSON.stringify(req.body, null, 2));
+      
+      const webhookData = req.body.data || req.body;
+      const { event_type, payload } = webhookData;
+      
+      console.log(`📞 Webhook event: ${event_type}`);
+      
+      if (payload && payload.call_control_id) {
+        const call = await storage.getCallByCallId(payload.call_control_id);
+        
+        if (call) {
+          let statusUpdate: any = {};
+          
+          switch (event_type) {
+            case 'call.initiated':
+              statusUpdate.status = 'ringing';
+              console.log(`📞 Call initiated: ${payload.call_control_id}`);
+              break;
+            case 'call.answered':
+              statusUpdate.status = 'active';
+              console.log(`📞 Call answered: ${payload.call_control_id}`);
+              break;
+            case 'call.hangup':
+              statusUpdate.status = 'ended';
+              statusUpdate.endTime = new Date();
+              console.log(`📞 Call ended: ${payload.call_control_id}`);
+              break;
+            case 'call.bridged':
+              statusUpdate.status = 'active';
+              console.log(`📞 Call bridged: ${payload.call_control_id}`);
+              break;
+            case 'call.streaming.started':
+            case 'streaming.started':
+              statusUpdate.metadata = updateMetadata(call.metadata, { 
+                mediaStreaming: true,
+                streamId: payload.stream_id,
+                streamingStarted: new Date().toISOString()
+              });
+              console.log(`🎵 Media streaming started: ${payload.call_control_id}, stream ID: ${payload.stream_id}`);
+              break;
+            case 'call.streaming.stopped':
+            case 'streaming.stopped':
+              statusUpdate.metadata = updateMetadata(call.metadata, { 
+                mediaStreaming: false,
+                streamingStopped: new Date().toISOString()
+              });
+              console.log(`🎵 Media streaming stopped: ${payload.call_control_id}`);
+              break;
+          }
+          
+          if (Object.keys(statusUpdate).length > 0) {
+            await storage.updateCall(call.id, statusUpdate);
+            console.log(`✅ Updated call ${call.id} status to: ${statusUpdate.status || 'metadata updated'}`);
+          }
+        } else {
+          console.log(`⚠️ Call not found for control ID: ${payload.call_control_id}`);
+        }
+      }
+      
+      res.status(200).json({ received: true });
+    } catch (error) {
+      console.error('❌ Webhook processing error:', error);
+      res.status(500).json({ error: 'Webhook processing failed' });
+    }
+  });
+
   app.get("/api/telnyx-config", async (req, res) => {
     try {
       const config = await storage.getTelnyxConfig();
@@ -251,6 +320,58 @@ export function registerRoutes(app: Express): Server {
     } catch (error) {
       console.error('Failed to create conference:', error);
       res.status(500).json({ message: "Failed to create conference" });
+    }
+  });
+
+  // Start media streaming for a call
+  app.post("/api/calls/:id/start-media-stream", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { track = 'both_tracks', codec = 'PCMU' } = req.body;
+      
+      const call = await storage.getCall(id);
+      if (!call) {
+        return res.status(404).json({ message: "Call not found" });
+      }
+
+      const callControlId = getCallControlId(call.metadata);
+      if (!callControlId) {
+        return res.status(400).json({ message: "Invalid call - missing Telnyx control ID" });
+      }
+
+      try {
+        // Start media streaming via Telnyx API
+        const response = await telnyxClient.startMediaStreaming(callControlId, track, codec);
+        
+        // Update call metadata
+        await storage.updateCall(id, {
+          metadata: updateMetadata(call.metadata, {
+            mediaStreaming: true,
+            streamingConfig: { track, codec },
+            streamingStarted: new Date().toISOString()
+          })
+        });
+
+        res.json({
+          success: true,
+          message: 'Media streaming started',
+          streamingUrl: `wss://${process.env.REPLIT_DOMAINS || 'localhost:5000'}/ws/telnyx-media`,
+          streamId: response.stream_id || 'pending'
+        });
+        
+        console.log(`🎵 Media streaming started for call ${callControlId}`);
+        
+      } catch (telnyxError) {
+        console.error('Telnyx media streaming error:', telnyxError);
+        res.status(500).json({ 
+          success: false, 
+          message: 'Failed to start media streaming via Telnyx' 
+        });
+      }
+      
+    } catch (error) {
+      console.error('Start media streaming error:', error);
+      res.status(500).json({ message: "Failed to start media streaming" });
     }
   });
 
